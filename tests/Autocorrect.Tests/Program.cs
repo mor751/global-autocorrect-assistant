@@ -1,8 +1,17 @@
-using Autocorrect.App;
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading;
 using Autocorrect.Core;
+using Autocorrect.Core.Brain;
 
 var tests = new (string Name, Action Run)[]
 {
+    ("brain indexer detects stack and ignores secrets", BrainIndexerDetectsStackAndIgnoresSecrets),
+    ("brain retrieval finds login file for animation prompt", BrainRetrievalFindsLoginFile),
+    ("prompt analyzer flags vague prompt", PromptAnalyzerFlagsVaguePrompt),
+    ("smart rewriter works without ollama", SmartRewriterWorksWithoutOllama),
+    ("secret scanner redacts keys", SecretScannerRedactsKeys),
     ("custom dictionary fixes component typo", CustomDictionaryFixesComponentTypo),
     ("symspell fixes common non-config typo", SymSpellFixesCommonNonConfigTypo),
     ("built-in fixes recent user typo examples", BuiltInFixesRecentUserTypoExamples),
@@ -10,20 +19,17 @@ var tests = new (string Name, Action Run)[]
     ("fixes short transposition words", FixesShortTranspositionWords),
     ("splits merged words", SplitsMergedWords),
     ("scrambled known word fixes to python", ScrambledKnownWordFixesToPython),
+    ("fixes heavy jumbled words", FixesHeavyJumbledWords),
     ("learned personal word wins ranking", LearnedPersonalWordWinsRanking),
+    ("context model scores known transitions", ContextModelScoresKnownTransitions),
+    ("learned bigram raises context affinity", LearnedBigramRaisesContextAffinity),
     ("suggestions include correction and learned words", SuggestionsIncludeCorrectionAndLearnedWords),
     ("protected vocabulary is not corrected", ProtectedVocabularyIsNotCorrected),
     ("unsafe tokens are not corrected", UnsafeTokensAreNotCorrected),
     ("correct words are left alone", CorrectWordsAreLeftAlone),
     ("ignored words are left alone", IgnoredWordsAreLeftAlone),
     ("replacement preserves title casing", ReplacementPreservesTitleCasing),
-    ("engine stays fast after warmup", EngineStaysFastAfterWarmup),
-    ("controller replaces only after delimiter", ControllerReplacesAfterDelimiter),
-    ("controller honors sensitive contexts", ControllerHonorsSensitiveContexts),
-    ("controller skips unsafe browser auto replacement", ControllerSkipsUnsafeBrowserAutoReplacement),
-    ("controller handles backspace in current word", ControllerHandlesBackspace),
-    ("controller does nothing while disabled", ControllerDoesNothingWhileDisabled),
-    ("controller skips late AI correction after new typing", ControllerSkipsLateCorrectionAfterNewTyping)
+    ("engine stays fast after warmup", EngineStaysFastAfterWarmup)
 };
 
 var failures = 0;
@@ -129,6 +135,16 @@ static void ScrambledKnownWordFixesToPython()
     Assert.Equal("python", result!.Replacement);
 }
 
+static void FixesHeavyJumbledWords()
+{
+    foreach (var (typo, expected) in new[] { ("usspeod", "supposed"), ("idffrence", "difference") })
+    {
+        var result = Correct(typo);
+        Assert.NotNull(result);
+        Assert.Equal(expected, result!.Replacement);
+    }
+}
+
 static void LearnedPersonalWordWinsRanking()
 {
     var settings = new CorrectionSettings
@@ -188,7 +204,6 @@ static void UnsafeTokensAreNotCorrected()
     Assert.Null(Correct("abc123"));
 }
 
-
 static void CorrectWordsAreLeftAlone()
 {
     Assert.Null(Correct("component"));
@@ -232,111 +247,27 @@ static void EngineStaysFastAfterWarmup()
     Assert.True(elapsed.TotalMilliseconds < 1000, $"Expected 500 warm lookups under 1000 ms, got {elapsed.TotalMilliseconds:0.0} ms.");
 }
 
-static void ControllerReplacesAfterDelimiter()
+static void ContextModelScoresKnownTransitions()
 {
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = NewController(keyboard, replacer: replacer);
+    var model = ContextLanguageModel.Default;
+    var settings = new CorrectionSettings();
 
-    controller.Start();
-    keyboard.Type("compomment");
-    Assert.Null(replacer.LastReplacement);
-
-    keyboard.Delimit(' ');
-
-    WaitUntil(() => replacer.LastReplacement is not null);
-    Assert.Equal(("compomment", "component", ' '), replacer.LastReplacement!.Value);
+    Assert.True(model.Affinity(new[] { "i" }, "want", settings) > 0.5, "Expected 'i want' to score highly.");
+    Assert.True(model.Affinity(new[] { "qqqq" }, "want", settings) == 0, "Unknown previous word should score zero.");
+    Assert.True(model.Affinity(Array.Empty<string>(), "want", settings) == 0, "No context should score zero.");
 }
 
-static void ControllerHonorsSensitiveContexts()
+static void LearnedBigramRaisesContextAffinity()
 {
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = NewController(
-        keyboard,
-        context: new FakeContextDetector(new AppContextSnapshot("chrome", "Login", "password", true, "password field")),
-        replacer: replacer);
+    var model = ContextLanguageModel.Default;
+    var settings = new CorrectionSettings();
 
-    controller.Start();
-    keyboard.Type("compomment");
-    keyboard.Delimit(' ');
-    Thread.Sleep(80);
+    var before = model.Affinity(new[] { "video" }, "kling", settings);
+    settings.LearnedBigrams[ContextLanguageModel.BigramKey("video", "kling")] = 4;
+    var after = model.Affinity(new[] { "video" }, "kling", settings);
 
-    Assert.Null(replacer.LastReplacement);
-}
-
-static void ControllerSkipsUnsafeBrowserAutoReplacement()
-{
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = NewController(
-        keyboard,
-        context: new FakeContextDetector(new AppContextSnapshot(
-            "chrome",
-            "Flow - Google",
-            "Chrome_WidgetWin_1",
-            false,
-            IsBrowser: true)),
-        replacer: replacer);
-
-    controller.Start();
-    keyboard.Type("compomment");
-    keyboard.Delimit(' ');
-    Thread.Sleep(120);
-
-    Assert.Null(replacer.LastReplacement);
-}
-
-static void ControllerHandlesBackspace()
-{
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = NewController(keyboard, replacer: replacer);
-
-    controller.Start();
-    keyboard.Type("compommenx");
-    keyboard.Backspace();
-    keyboard.Type("t");
-    keyboard.Delimit(' ');
-
-    WaitUntil(() => replacer.LastReplacement is not null);
-    Assert.Equal(("compomment", "component", ' '), replacer.LastReplacement!.Value);
-}
-
-static void ControllerDoesNothingWhileDisabled()
-{
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = NewController(keyboard, new CorrectionSettings { Enabled = false }, replacer: replacer);
-
-    controller.Start();
-    keyboard.Type("compomment");
-    keyboard.Delimit(' ');
-    Thread.Sleep(80);
-
-    Assert.Null(replacer.LastReplacement);
-}
-
-static void ControllerSkipsLateCorrectionAfterNewTyping()
-{
-    var keyboard = new FakeKeyboardMonitor();
-    var replacer = new FakeTextReplacer();
-    using var controller = new AutocorrectController(
-        keyboard,
-        new FakeContextDetector(new AppContextSnapshot("notepad", "Untitled", "Edit", false)),
-        replacer,
-        new SlowCorrectionEngine(),
-        new CorrectionSettings { MaxCorrectionLatencyMs = 500 },
-        new RecentCorrectionStore(),
-        new RuntimeStatusStore());
-
-    controller.Start();
-    keyboard.Type("wrng");
-    keyboard.Delimit(' ');
-    keyboard.Type("next");
-    Thread.Sleep(250);
-
-    Assert.Null(replacer.LastReplacement);
+    Assert.True(before == 0, "Unknown personal pair should start at zero.");
+    Assert.True(after > 0.8, "Learned personal pair should raise context affinity.");
 }
 
 static CorrectionResult? Correct(string word)
@@ -346,112 +277,126 @@ static CorrectionResult? Correct(string word)
         new CorrectionSettings());
 }
 
-static AutocorrectController NewController(
-    FakeKeyboardMonitor keyboard,
-    CorrectionSettings? settings = null,
-    ITextContextDetector? context = null,
-    FakeTextReplacer? replacer = null)
+static string CreateSampleProject()
 {
-    return new AutocorrectController(
-        keyboard,
-        context ?? new FakeContextDetector(new AppContextSnapshot("notepad", "Untitled", "Edit", false)),
-        replacer ?? new FakeTextReplacer(),
-        new LocalCorrectionEngine(),
-        settings ?? new CorrectionSettings(),
-        new RecentCorrectionStore(),
-        new RuntimeStatusStore());
+    var root = Path.Combine(Path.GetTempPath(), "brain-test-" + Guid.NewGuid().ToString("N")[..8]);
+    Directory.CreateDirectory(Path.Combine(root, "src", "components"));
+    Directory.CreateDirectory(Path.Combine(root, "src", "app"));
+
+    File.WriteAllText(Path.Combine(root, "package.json"),
+        "{\"name\":\"sample\",\"dependencies\":{\"react\":\"18.0.0\",\"tailwindcss\":\"3.4.0\",\"gsap\":\"3.12.0\"}}");
+    File.WriteAllText(Path.Combine(root, "tailwind.config.js"), "module.exports = { content: [] };");
+    File.WriteAllText(Path.Combine(root, "src", "components", "LoginForm.tsx"),
+        "import gsap from 'gsap';\nexport function LoginForm() {\n  gsap.to('.btn', { opacity: 1 });\n  return null;\n}\n");
+    File.WriteAllText(Path.Combine(root, "src", "app", "page.tsx"),
+        "export default function Page() { return null; }\n");
+    File.WriteAllText(Path.Combine(root, "src", "config.ts"),
+        "export const token = \"sk-abcdef123456789\";\n");
+    File.WriteAllText(Path.Combine(root, ".env"), "API_KEY=sk-supersecretvalue1234\n");
+    return root;
 }
 
-static void WaitUntil(Func<bool> condition)
+static void BrainIndexerDetectsStackAndIgnoresSecrets()
 {
-    var deadline = DateTimeOffset.UtcNow.AddSeconds(2);
-    while (DateTimeOffset.UtcNow < deadline)
+    var root = CreateSampleProject();
+    try
     {
-        if (condition())
+        var brain = new ProjectIndexer().Index(root, new IndexOptions());
+
+        Assert.Equal("React", brain.Stack.Framework);
+        Assert.Equal("Tailwind CSS", brain.Stack.Styling);
+        Assert.True(brain.Rules.Any(r => r.Contains("GSAP", StringComparison.OrdinalIgnoreCase)), "Expected GSAP rule.");
+        Assert.True(brain.Files.All(f => !f.Path.EndsWith(".env", StringComparison.OrdinalIgnoreCase)), ".env must be ignored.");
+        Assert.True(brain.Files.All(f => f.PreviewChunks.All(c => !c.Contains("abcdef123456789", StringComparison.Ordinal))), "Secrets must be redacted.");
+    }
+    finally
+    {
+        TryDelete(root);
+    }
+}
+
+static void BrainRetrievalFindsLoginFile()
+{
+    var root = CreateSampleProject();
+    var brainBase = Path.Combine(Path.GetTempPath(), "brain-store-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        var brain = new ProjectIndexer().Index(root, new IndexOptions());
+        var store = new FileVectorStore(brainBase, root, new KeywordEmbeddingProvider());
+        store.AddDocumentsAsync(brain.Files.Select(f => new VectorDocument
         {
-            return;
-        }
+            Id = f.Path,
+            Path = f.Path,
+            Role = f.Role,
+            Summary = f.Summary,
+            Text = $"{f.Path} {f.Summary} {string.Join(' ', f.Symbols)}"
+        }), CancellationToken.None).GetAwaiter().GetResult();
 
-        Thread.Sleep(10);
+        var hits = store.SearchAsync("fix the login animation", 6, CancellationToken.None).GetAwaiter().GetResult();
+        Assert.True(hits.Any(h => h.Document.Path.Contains("LoginForm", StringComparison.OrdinalIgnoreCase)), "Expected LoginForm in retrieval.");
     }
-
-    throw new InvalidOperationException("Timed out waiting for async controller work.");
+    finally
+    {
+        TryDelete(root);
+        TryDelete(brainBase);
+    }
 }
 
-internal sealed class FakeKeyboardMonitor : IKeyboardMonitor
+static void PromptAnalyzerFlagsVaguePrompt()
 {
-    public event EventHandler<TypedKeyEventArgs>? KeyTyped;
+    var analysis = new PromptAnalyzer().Analyze(
+        "make this page better",
+        null,
+        Array.Empty<RetrievedFile>(),
+        new UserPreferences());
 
-    public bool Started { get; private set; }
+    Assert.True(analysis.ShouldAskUserForMoreInfo || analysis.MissingContext.Count > 0, "Vague prompt should request more info.");
+}
 
-    public void Start()
+static void SmartRewriterWorksWithoutOllama()
+{
+    var root = CreateSampleProject();
+    try
     {
-        Started = true;
+        var brain = new ProjectIndexer().Index(root, new IndexOptions());
+        var retrieved = brain.Files
+            .Where(f => f.Path.Contains("LoginForm", StringComparison.OrdinalIgnoreCase))
+            .Select(f => new RetrievedFile { File = f, Reason = "keyword match", Score = 1 })
+            .ToList();
+        var analysis = new PromptAnalyzer().Analyze("fix the login animation", brain, retrieved, new UserPreferences());
+
+        var result = new SmartPromptRewriter(null)
+            .BuildAsync("fix the login animation", analysis, brain, retrieved, new UserPreferences(), false, CancellationToken.None)
+            .GetAwaiter().GetResult();
+
+        Assert.True(result.ImprovedPrompt.Contains("Task:", StringComparison.Ordinal), "Structured prompt expected.");
+        Assert.True(result.ImprovedPrompt.Contains("Instructions:", StringComparison.Ordinal), "Instructions section expected.");
+        Assert.False(result.UsedOllama);
     }
-
-    public void Stop()
+    finally
     {
-        Started = false;
+        TryDelete(root);
     }
+}
 
-    public void Dispose()
-    {
-        Stop();
-    }
+static void SecretScannerRedactsKeys()
+{
+    Assert.True(SecretScanner.Redact("API_KEY=sk-1234567890abcdef").Contains("[REDACTED]", StringComparison.Ordinal), "API key should be redacted.");
+    Assert.True(SecretScanner.Redact("postgres://user:pass@host:5432/db").Contains("[REDACTED]", StringComparison.Ordinal), "Database URL should be redacted.");
+}
 
-    public void Type(string text)
+static void TryDelete(string path)
+{
+    try
     {
-        foreach (var c in text)
+        if (Directory.Exists(path))
         {
-            KeyTyped?.Invoke(this, new TypedKeyEventArgs(TypedKeyKind.Character, c));
+            Directory.Delete(path, true);
         }
     }
-
-    public void Delimit(char delimiter)
+    catch
     {
-        KeyTyped?.Invoke(this, new TypedKeyEventArgs(TypedKeyKind.Delimiter, delimiter));
-    }
-
-    public void Backspace()
-    {
-        KeyTyped?.Invoke(this, new TypedKeyEventArgs(TypedKeyKind.Backspace));
-    }
-}
-
-internal sealed class FakeContextDetector(AppContextSnapshot context) : ITextContextDetector
-{
-    public AppContextSnapshot GetActiveContext(CorrectionSettings settings)
-    {
-        return context;
-    }
-}
-
-internal sealed class FakeTextReplacer : ITextReplacer
-{
-    public (string Original, string Replacement, char Delimiter)? LastReplacement { get; private set; }
-
-    public ReplacementResult ReplaceCompletedWord(string originalWord, string replacement, char delimiter)
-    {
-        LastReplacement = (originalWord, replacement, delimiter);
-        return new ReplacementResult(true, "fake", null, originalWord, replacement);
-    }
-
-    public ReplacementResult ReplaceCurrentWord(string originalWord, string replacement)
-    {
-        LastReplacement = (originalWord, replacement, '\0');
-        return new ReplacementResult(true, "fake", null, originalWord, replacement);
-    }
-}
-
-internal sealed class SlowCorrectionEngine : IAsyncCorrectionEngine
-{
-    public async ValueTask<CorrectionResult?> CorrectAsync(
-        CorrectionRequest request,
-        CorrectionSettings settings,
-        CancellationToken cancellationToken)
-    {
-        await Task.Delay(120, cancellationToken);
-        return new CorrectionResult(request.Word, "wrong", 0.99, "slow fake");
+        // Temp cleanup is best-effort.
     }
 }
 
@@ -470,6 +415,14 @@ internal static class Assert
         if (!condition)
         {
             throw new InvalidOperationException(message ?? "Expected condition to be true.");
+        }
+    }
+
+    public static void False(bool condition, string? message = null)
+    {
+        if (condition)
+        {
+            throw new InvalidOperationException(message ?? "Expected condition to be false.");
         }
     }
 

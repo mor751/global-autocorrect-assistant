@@ -6,6 +6,7 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
 {
     private const int MaxEditDistance = 2;
     private const int PrefixLength = 7;
+    private const int JumbleSignatureDistance = 1;
 
     private static readonly Lazy<SymSpellIndex> Index = new(() => SymSpellIndex.Build(EnglishFrequencyDictionary.All));
 
@@ -78,18 +79,6 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
         ["wroids"] = "words",
         ["setgigna"] = "settings",
         ["coplme"] = "complete"
-    };
-
-    private static readonly Dictionary<string, string[]> ContextBoosts = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["i"] = ["want", "am", "will", "can", "need"],
-        ["you"] = ["want", "are", "will", "can", "need"],
-        ["to"] = ["the", "use", "make", "build", "fix"],
-        ["not"] = ["working", "good", "fast"],
-        ["use"] = ["the", "python", "onnx", "tensorflow"],
-        ["small"] = ["library", "model"],
-        ["fix"] = ["the", "word", "words"],
-        ["make"] = ["it", "this", "fast", "smooth"]
     };
 
     public static void WarmUp()
@@ -347,6 +336,7 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
         AddLearnedCandidates(input, settings, candidates);
         AddRepeatedCharacterCandidates(input, candidates);
         AddScrambleCandidates(input, candidates);
+        AddJumbleCandidates(input, candidates);
 
         if (candidates.Count == 0)
         {
@@ -364,15 +354,22 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
 
             var isScramble = IsLooseScramble(input, candidate);
             var distance = DamerauLevenshteinWithin(input, candidate, MaxEditDistance);
-            if ((distance > MaxEditDistance && !isScramble) || IsRiskyShortCorrection(input, candidate, distance))
+            var withinNormal = distance <= MaxEditDistance && !IsRiskyShortCorrection(input, candidate, distance);
+            var isJumble = !isScramble && !withinNormal && IsJumble(input, candidate);
+            if (!isScramble && !withinNormal && !isJumble)
             {
                 continue;
             }
 
             var frequency = GetBlendedFrequency(candidate, settings);
-            var effectiveDistance = isScramble ? Math.Min(distance, MaxEditDistance) : distance;
+            var effectiveDistance = isScramble || isJumble ? Math.Min(distance, MaxEditDistance) : distance;
             var score = Score(input, candidate, effectiveDistance, frequency, previousWords, settings);
-            var item = new CandidateScore(candidate, effectiveDistance, frequency, score);
+            if (isJumble)
+            {
+                score += 9;
+            }
+
+            var item = new CandidateScore(candidate, effectiveDistance, frequency, score, isJumble);
             if (best is null || item.Score > best.Value.Score)
             {
                 second = best;
@@ -411,6 +408,24 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
                 IsLooseScramble(input, word))
             {
                 candidates.Add(word);
+            }
+        }
+    }
+
+    // Pulls dictionary words whose letter multiset is within a couple of edits of the input, catching heavy jumbles.
+    private static void AddJumbleCandidates(string input, HashSet<string> candidates)
+    {
+        if (input.Length is < 5 or > 18)
+        {
+            return;
+        }
+
+        var signature = Signature(input);
+        foreach (var delete in SymSpellIndex.GenerateDeletes(signature, JumbleSignatureDistance, signature.Length))
+        {
+            foreach (var candidate in Index.Value.SignatureCandidates(delete))
+            {
+                candidates.Add(candidate);
             }
         }
     }
@@ -506,13 +521,7 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
             score += Math.Min(36, 18 + learnedCount * 2.5);
         }
 
-        var previous = previousWords.LastOrDefault();
-        if (previous is not null &&
-            ContextBoosts.TryGetValue(previous, out var boosted) &&
-            boosted.Contains(candidate, StringComparer.OrdinalIgnoreCase))
-        {
-            score += 12;
-        }
+        score += ContextLanguageModel.Default.Affinity(previousWords, candidate, settings) * 16;
 
         return score;
     }
@@ -533,26 +542,34 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
 
     private static double Confidence(string input, CandidateScore best, CandidateScore? second)
     {
-        var confidence = best.Distance switch
+        double confidence;
+        if (best.IsJumble)
         {
-            0 => 1.0,
-            1 => 0.955,
-            _ => input.Length >= 7 ? 0.93 : 0.88
-        };
-
-        if (IsTransposition(input, best.Word))
-        {
-            confidence += 0.025;
+            confidence = 0.94;
         }
-
-        if (HasKeyboardNeighborPattern(input, best.Word))
+        else
         {
-            confidence += 0.015;
-        }
+            confidence = best.Distance switch
+            {
+                0 => 1.0,
+                1 => 0.955,
+                _ => input.Length >= 7 ? 0.93 : 0.88
+            };
 
-        if (IsLooseScramble(input, best.Word))
-        {
-            confidence += 0.03;
+            if (IsTransposition(input, best.Word))
+            {
+                confidence += 0.025;
+            }
+
+            if (HasKeyboardNeighborPattern(input, best.Word))
+            {
+                confidence += 0.015;
+            }
+
+            if (IsLooseScramble(input, best.Word))
+            {
+                confidence += 0.03;
+            }
         }
 
         if (second is not null && best.Score - second.Value.Score < 8)
@@ -611,6 +628,35 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
         }
 
         return false;
+    }
+
+    // True when input and candidate share nearly the same letters (a jumble), even at edit distance 3+.
+    private static bool IsJumble(string input, string candidate)
+    {
+        if (input.Length < 5 || candidate.Length < 4 || Math.Abs(input.Length - candidate.Length) > MaxEditDistance)
+        {
+            return false;
+        }
+
+        if (!FirstLettersAligned(input, candidate))
+        {
+            return false;
+        }
+
+        return DamerauLevenshteinWithin(Signature(input), Signature(candidate), JumbleSignatureDistance) <= JumbleSignatureDistance;
+    }
+
+    // Real typos keep the first letter, or swap the first two; this guards jumbles against unrelated anagrams.
+    private static bool FirstLettersAligned(string input, string candidate)
+    {
+        if (char.ToLowerInvariant(input[0]) == char.ToLowerInvariant(candidate[0]))
+        {
+            return true;
+        }
+
+        return input.Length >= 2 && candidate.Length >= 2 &&
+               char.ToLowerInvariant(input[0]) == char.ToLowerInvariant(candidate[1]) &&
+               char.ToLowerInvariant(input[1]) == char.ToLowerInvariant(candidate[0]);
     }
 
     private static bool IsLooseScramble(string input, string candidate)
@@ -742,7 +788,7 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
         return previous[target.Length];
     }
 
-    private readonly record struct CandidateScore(string Word, int Distance, long Frequency, double Score);
+    private readonly record struct CandidateScore(string Word, int Distance, long Frequency, double Score, bool IsJumble);
 
     private readonly record struct SplitCandidate(string Left, string Right, double Score);
 
@@ -752,17 +798,20 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
         private readonly Dictionary<string, string[]> _deleteIndex;
         private readonly Dictionary<string, string[]> _wordsBySignature;
         private readonly Dictionary<string, string[]> _prefixIndex;
+        private readonly Dictionary<string, string[]> _signatureDeleteIndex;
 
         private SymSpellIndex(
             IReadOnlyDictionary<string, long> frequencies,
             Dictionary<string, string[]> deleteIndex,
             Dictionary<string, string[]> wordsBySignature,
-            Dictionary<string, string[]> prefixIndex)
+            Dictionary<string, string[]> prefixIndex,
+            Dictionary<string, string[]> signatureDeleteIndex)
         {
             _frequencies = frequencies;
             _deleteIndex = deleteIndex;
             _wordsBySignature = wordsBySignature;
             _prefixIndex = prefixIndex;
+            _signatureDeleteIndex = signatureDeleteIndex;
         }
 
         public static SymSpellIndex Build(IReadOnlyDictionary<string, long> frequencies)
@@ -791,7 +840,8 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
                 .GroupBy(Signature)
                 .ToDictionary(group => group.Key, group => group.ToArray());
             var prefixIndex = BuildPrefixIndex(frequencies);
-            return new SymSpellIndex(frequencies, compact, wordsBySignature, prefixIndex);
+            var signatureDeleteIndex = BuildSignatureDeleteIndex(frequencies);
+            return new SymSpellIndex(frequencies, compact, wordsBySignature, prefixIndex, signatureDeleteIndex);
         }
 
         public bool ContainsWord(string word)
@@ -814,6 +864,11 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
             return _wordsBySignature.TryGetValue(signature, out var words) ? words : Array.Empty<string>();
         }
 
+        public IReadOnlyList<string> SignatureCandidates(string signatureDelete)
+        {
+            return _signatureDeleteIndex.TryGetValue(signatureDelete, out var words) ? words : Array.Empty<string>();
+        }
+
         public IReadOnlyList<(string Word, long Frequency)> PrefixMatches(string prefix, int limit)
         {
             var key = prefix.Length > 4 ? prefix[..4] : prefix;
@@ -828,6 +883,36 @@ public class SymSpellCorrectionEngine : ICorrectionEngine, IAsyncCorrectionEngin
                 .OrderByDescending(pair => pair.Item2)
                 .Take(limit)
                 .ToArray();
+        }
+
+        // Indexes words by deletions of their sorted-letter signature so near-anagram (jumbled) typos can be found.
+        private static Dictionary<string, string[]> BuildSignatureDeleteIndex(IReadOnlyDictionary<string, long> frequencies)
+        {
+            var mutable = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach (var word in frequencies.Keys)
+            {
+                if (word.Length is < 5 or > 18)
+                {
+                    continue;
+                }
+
+                var signature = Signature(word);
+                foreach (var delete in GenerateDeletes(signature, JumbleSignatureDistance, signature.Length))
+                {
+                    if (!mutable.TryGetValue(delete, out var entries))
+                    {
+                        entries = [];
+                        mutable[delete] = entries;
+                    }
+
+                    entries.Add(word);
+                }
+            }
+
+            return mutable.ToDictionary(
+                pair => pair.Key,
+                pair => pair.Value.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                StringComparer.Ordinal);
         }
 
         private static Dictionary<string, string[]> BuildPrefixIndex(IReadOnlyDictionary<string, long> frequencies)

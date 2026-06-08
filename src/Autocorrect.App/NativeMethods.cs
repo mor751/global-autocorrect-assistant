@@ -27,6 +27,9 @@ internal static partial class NativeMethods
     internal const int VK_LWIN = 0x5B;
     internal const int VK_RWIN = 0x5C;
     internal const int VK_V = 0x56;
+    internal const int VK_C = 0x43;
+    internal const int VK_A = 0x41;
+    internal const int VK_D = 0x44;
     internal const int VK_F = 0x46;
     internal const int VK_O = 0x4F;
     internal const int VK_S = 0x53;
@@ -37,6 +40,8 @@ internal static partial class NativeMethods
     internal const uint INPUT_KEYBOARD = 1;
     internal const uint KEYEVENTF_KEYUP = 0x0002;
     internal const uint KEYEVENTF_UNICODE = 0x0004;
+    internal const int GWL_EXSTYLE = -20;
+    internal const int WS_EX_NOACTIVATE = 0x08000000;
     internal const uint GA_ROOT = 2;
 
     internal delegate nint LowLevelKeyboardProc(int nCode, nint wParam, nint lParam);
@@ -143,6 +148,9 @@ internal static partial class NativeMethods
     internal static extern nint GetForegroundWindow();
 
     [DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(nint hWnd);
+
+    [DllImport("user32.dll")]
     internal static extern nint WindowFromPoint(Point point);
 
     [DllImport("user32.dll")]
@@ -166,6 +174,12 @@ internal static partial class NativeMethods
 
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern uint SendInput(uint cInputs, Input[] pInputs, int cbSize);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    internal static extern nint GetWindowLongPtr(nint hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    internal static extern nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern int GetWindowText(nint hWnd, StringBuilder lpString, int nMaxCount);

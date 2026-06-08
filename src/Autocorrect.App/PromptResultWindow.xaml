@@ -1,0 +1,194 @@
+<Window x:Class="Autocorrect.App.PromptResultWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Project-aware prompt"
+        Width="860"
+        Height="720"
+        MinWidth="720"
+        MinHeight="560"
+        Background="#070A0E"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        TextOptions.TextRenderingMode="ClearType">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Bg1" Color="#0E141B" />
+        <SolidColorBrush x:Key="Bg2" Color="#151E27" />
+        <SolidColorBrush x:Key="Line" Color="#1F2A36" />
+        <SolidColorBrush x:Key="Ink" Color="#E6EDF3" />
+        <SolidColorBrush x:Key="Muted" Color="#7C8B9A" />
+        <SolidColorBrush x:Key="Cyan" Color="#22D3EE" />
+        <SolidColorBrush x:Key="CyanInk" Color="#04121A" />
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="CaretBrush" Value="{StaticResource Cyan}" />
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontFamily" Value="Cascadia Mono, Consolas, monospace" />
+            <Setter Property="AcceptsReturn" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+        </Style>
+
+        <Style x:Key="Chip" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="12,7" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="MinWidth" Value="120" />
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Cyan}" />
+            <Setter Property="Foreground" Value="{StaticResource CyanInk}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Cyan}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border x:Name="Banner" Grid.Row="0" CornerRadius="10" Padding="14,11" Margin="0,0,0,14" Background="#0E2630" BorderBrush="#22D3EE" BorderThickness="1">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="BannerIcon" Text="&#x2728;" FontSize="16" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBlock x:Name="BannerText" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,14">
+            <Border Style="{StaticResource Chip}">
+                <StackPanel>
+                    <TextBlock Text="QUALITY" Foreground="{StaticResource Muted}" FontSize="10" />
+                    <TextBlock x:Name="QualityValue" Foreground="{StaticResource Cyan}" FontSize="18" FontWeight="Bold" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Chip}">
+                <StackPanel>
+                    <TextBlock Text="CLARITY" Foreground="{StaticResource Muted}" FontSize="10" />
+                    <TextBlock x:Name="ClarityValue" FontSize="18" FontWeight="Bold" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Chip}">
+                <StackPanel>
+                    <TextBlock Text="CONTEXT" Foreground="{StaticResource Muted}" FontSize="10" />
+                    <TextBlock x:Name="ContextValue" FontSize="18" FontWeight="Bold" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Chip}">
+                <StackPanel>
+                    <TextBlock Text="RISK" Foreground="{StaticResource Muted}" FontSize="10" />
+                    <TextBlock x:Name="RiskValue" FontSize="18" FontWeight="Bold" />
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Chip}">
+                <StackPanel>
+                    <TextBlock Text="TASK TYPE" Foreground="{StaticResource Muted}" FontSize="10" />
+                    <TextBlock x:Name="TaskTypeValue" FontSize="18" FontWeight="Bold" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="ORIGINAL PROMPT" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4" />
+                <TextBox x:Name="OriginalBox" Height="64" IsReadOnly="True" Background="#0B1015" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="3">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" />
+                <ColumnDefinition Width="2*" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                <TextBlock Text="IMPROVED PROMPT (editable)" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4" />
+                <TextBox x:Name="ImprovedBox" Height="300" VerticalScrollBarVisibility="Auto" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="RELEVANT FILES" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,0,0,4" />
+                <Border Background="{StaticResource Bg1}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="9" Padding="8" Height="138">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="FilesList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Foreground="#9FD9E8" FontSize="12" Margin="0,0,0,5" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+                <TextBlock Text="MISSING CONTEXT" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,12,0,4" />
+                <Border Background="{StaticResource Bg1}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="9" Padding="8" Height="120">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="MissingList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" Foreground="#F4C77B" FontSize="12" Margin="0,0,0,5" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <TextBlock x:Name="EffectText" Grid.Row="4" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,12,0,12" />
+
+        <WrapPanel Grid.Row="5">
+            <Button x:Name="CopyButton" Content="Copy improved" Style="{StaticResource PrimaryButton}" Click="Copy_OnClick" />
+            <Button x:Name="ReplaceButton" Content="Replace in app" Click="Replace_OnClick" />
+            <Button x:Name="ShorterButton" Content="Use shorter" Click="Shorter_OnClick" />
+            <Button x:Name="AddContextButton" Content="Add missing context" Click="AddContext_OnClick" />
+            <Button x:Name="ReindexButton" Content="Re-index project" Click="Reindex_OnClick" />
+            <Button x:Name="OpenBrainButton" Content="Open Project Brain" Click="OpenBrain_OnClick" />
+        </WrapPanel>
+    </Grid>
+</Window>

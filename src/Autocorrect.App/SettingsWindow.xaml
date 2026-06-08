@@ -2,91 +2,390 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Global Autocorrect"
-        Height="680"
-        Width="880"
-        MinHeight="620"
-        MinWidth="760"
-        Background="#F5F7FA"
-        WindowStartupLocation="CenterScreen">
+        Height="700"
+        Width="900"
+        MinHeight="640"
+        MinWidth="780"
+        Background="#070A0E"
+        WindowStartupLocation="CenterScreen"
+        TextOptions.TextFormattingMode="Ideal"
+        TextOptions.TextRenderingMode="ClearType">
     <Window.Resources>
-        <SolidColorBrush x:Key="Ink" Color="#182230" />
-        <SolidColorBrush x:Key="Muted" Color="#667085" />
-        <SolidColorBrush x:Key="Panel" Color="#FFFFFF" />
-        <SolidColorBrush x:Key="Line" Color="#D0D5DD" />
+        <SolidColorBrush x:Key="Bg0" Color="#070A0E" />
+        <SolidColorBrush x:Key="Bg1" Color="#0E141B" />
+        <SolidColorBrush x:Key="Bg2" Color="#151E27" />
+        <SolidColorBrush x:Key="Line" Color="#1F2A36" />
+        <SolidColorBrush x:Key="Ink" Color="#E6EDF3" />
+        <SolidColorBrush x:Key="Muted" Color="#7C8B9A" />
+        <SolidColorBrush x:Key="Cyan" Color="#22D3EE" />
+        <SolidColorBrush x:Key="CyanInk" Color="#04121A" />
+        <SolidColorBrush x:Key="Danger" Color="#F87171" />
+
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Ink}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
-        <Style TargetType="Button">
-            <Setter Property="MinWidth" Value="92" />
-            <Setter Property="Height" Value="34" />
-            <Setter Property="Padding" Value="14,0" />
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
-            <Setter Property="Padding" Value="8" />
-        </Style>
+
         <Style x:Key="PanelBorder" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource Panel}" />
-            <Setter Property="BorderBrush" Value="#E4E7EC" />
+            <Setter Property="Background" Value="{StaticResource Bg1}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="CornerRadius" Value="10" />
             <Setter Property="Padding" Value="16" />
         </Style>
+
         <Style x:Key="MetricLabel" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{StaticResource Muted}" />
             <Setter Property="FontSize" Value="12" />
         </Style>
         <Style x:Key="MetricValue" TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Ink}" />
-            <Setter Property="FontSize" Value="22" />
+            <Setter Property="Foreground" Value="{StaticResource Cyan}" />
+            <Setter Property="FontSize" Value="24" />
             <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="CaretBrush" Value="{StaticResource Cyan}" />
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="9" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="Padding" Value="16,0" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Cyan}" />
+            <Setter Property="Foreground" Value="{StaticResource CyanInk}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Cyan}" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Margin" Value="0,3" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Border x:Name="Box"
+                                    Width="19" Height="19"
+                                    CornerRadius="5"
+                                    Background="{StaticResource Bg2}"
+                                    BorderBrush="{StaticResource Line}"
+                                    BorderThickness="1.3"
+                                    VerticalAlignment="Center">
+                                <Path x:Name="Check"
+                                      Data="M 4 9 L 8 13 L 15 5"
+                                      Stroke="{StaticResource CyanInk}"
+                                      StrokeThickness="2"
+                                      StrokeStartLineCap="Round"
+                                      StrokeEndLineCap="Round"
+                                      Stretch="None"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Visibility="Collapsed" />
+                            </Border>
+                            <ContentPresenter Margin="9,0,0,0"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Box" Property="Background" Value="{StaticResource Cyan}" />
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Cyan}" />
+                                <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="Separator">
+            <Setter Property="Background" Value="{StaticResource Line}" />
+            <Setter Property="Margin" Value="0,16" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Separator">
+                        <Border Height="1" Background="{TemplateBinding Background}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="RepeatButton" x:Key="SliderSide">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RepeatButton">
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Thumb" x:Key="SliderThumb">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Ellipse Fill="{StaticResource Cyan}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Slider">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="4" CornerRadius="2" Background="{StaticResource Line}" />
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Style="{StaticResource SliderSide}">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="4" CornerRadius="2" Background="{StaticResource Cyan}" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Style="{StaticResource SliderSide}" />
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Style="{StaticResource SliderThumb}" />
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Margin="3,2" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Bg2}" />
+                                <Setter Property="Foreground" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="Background" Value="{StaticResource Bg2}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          ClickMode="Press">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{StaticResource Bg2}"
+                                                BorderBrush="{StaticResource Line}"
+                                                BorderThickness="1"
+                                                CornerRadius="8">
+                                            <Path HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,12,0"
+                                                  Data="M 0 0 L 9 0 L 4.5 5 Z"
+                                                  Fill="{StaticResource Cyan}" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              Margin="12,0,30,0"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{StaticResource Ink}" />
+                            <Popup Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Border Background="{StaticResource Bg1}"
+                                        BorderBrush="{StaticResource Line}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Margin="0,4,0,0">
+                                    <ScrollViewer MaxHeight="220">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TabControl">
+            <Setter Property="Background" Value="{StaticResource Bg1}" />
+            <Setter Property="BorderBrush" Value="{StaticResource Line}" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="{StaticResource Muted}" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="Bd"
+                                Background="Transparent"
+                                CornerRadius="8"
+                                Margin="0,0,8,6"
+                                MinWidth="138">
+                            <Grid>
+                                <Border x:Name="Accent"
+                                        Width="3"
+                                        Height="18"
+                                        HorizontalAlignment="Left"
+                                        CornerRadius="2"
+                                        Background="{StaticResource Cyan}"
+                                        Visibility="Collapsed" />
+                                <ContentPresenter ContentSource="Header"
+                                                  VerticalAlignment="Center"
+                                                  Margin="16,10"
+                                                  TextElement.Foreground="{TemplateBinding Foreground}" />
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Bg2}" />
+                                <Setter TargetName="Accent" Property="Visibility" Value="Visible" />
+                                <Setter Property="Foreground" Value="{StaticResource Cyan}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource Ink}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Window.Resources>
 
-    <Grid Margin="20">
+    <Grid Margin="22">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Margin="0,0,0,16">
+        <Grid Grid.Row="0" Margin="0,0,0,18">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <StackPanel>
-                <TextBlock Text="Global Autocorrect"
-                           FontSize="28"
-                           FontWeight="SemiBold" />
-                <TextBlock Text="Personal global autocorrect with live suggestions and local learning."
+                <StackPanel Orientation="Horizontal">
+                    <Border Width="10" Height="10" CornerRadius="5" Background="{StaticResource Cyan}" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <TextBlock Text="Global Autocorrect" FontSize="28" FontWeight="SemiBold" />
+                </StackPanel>
+                <TextBlock Text="Global autocorrect with live suggestions, local learning, and context ranking."
                            Foreground="{StaticResource Muted}"
-                           Margin="0,4,0,0" />
+                           Margin="0,6,0,0" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <CheckBox x:Name="EnabledCheckBox" Content="Running" FontSize="15" Margin="0,0,12,0" />
-                <CheckBox x:Name="AutocorrectEnabledCheckBox" Content="Autocorrect" FontSize="15" Margin="0,0,12,0" />
+                <CheckBox x:Name="EnabledCheckBox" Content="Running" FontSize="15" Margin="0,0,16,0" />
+                <CheckBox x:Name="AutocorrectEnabledCheckBox" Content="Autocorrect" FontSize="15" Margin="0,0,16,0" />
                 <CheckBox x:Name="AiOverlayEnabledCheckBox" Content="AI overlay" FontSize="15" />
             </StackPanel>
         </Grid>
 
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="280" />
+                <ColumnDefinition Width="290" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Margin="0,0,16,0">
-                <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
+            <StackPanel Grid.Column="0" Margin="0,0,18,0">
+                <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,14">
                     <StackPanel>
                         <TextBlock Text="Live status" FontSize="16" FontWeight="SemiBold" />
                         <UniformGrid Columns="2" Margin="0,14,0,0">
-                            <StackPanel Margin="0,0,10,12">
+                            <StackPanel Margin="0,0,10,14">
                                 <TextBlock Text="Inputs" Style="{StaticResource MetricLabel}" />
                                 <TextBlock x:Name="InputEventsValue" Text="0" Style="{StaticResource MetricValue}" />
                             </StackPanel>
-                            <StackPanel Margin="0,0,0,12">
+                            <StackPanel Margin="0,0,0,14">
                                 <TextBlock Text="Fixes" Style="{StaticResource MetricLabel}" />
                                 <TextBlock x:Name="CorrectionsValue" Text="0" Style="{StaticResource MetricValue}" />
                             </StackPanel>
@@ -100,7 +399,7 @@
                             </StackPanel>
                         </UniformGrid>
                         <TextBlock x:Name="LastErrorText"
-                                   Foreground="#B42318"
+                                   Foreground="{StaticResource Danger}"
                                    Margin="0,12,0,0" />
                     </StackPanel>
                 </Border>
@@ -108,10 +407,10 @@
                 <Border Style="{StaticResource PanelBorder}">
                     <StackPanel>
                         <TextBlock Text="Speed" FontSize="16" FontWeight="SemiBold" />
-                <TextBlock Text="The keyboard hook never waits. This limit prevents late replacements after you keep typing."
+                        <TextBlock Text="The keyboard hook never waits. This limit prevents late replacements after you keep typing."
                                    Foreground="{StaticResource Muted}"
                                    Margin="0,4,0,14" />
-                        <TextBlock x:Name="MaxLatencyValue" Margin="0,14,0,0" />
+                        <TextBlock x:Name="MaxLatencyValue" Margin="0,8,0,0" />
                         <Slider x:Name="MaxLatencySlider"
                                 Minimum="80"
                                 Maximum="1200"
@@ -122,26 +421,14 @@
                 </Border>
             </StackPanel>
 
-            <TabControl Grid.Column="1"
-                        TabStripPlacement="Left">
-                <TabControl.Resources>
-                    <Style TargetType="TabItem">
-                        <Setter Property="MinWidth" Value="132" />
-                        <Setter Property="MinHeight" Value="38" />
-                        <Setter Property="Padding" Value="12,8" />
-                        <Setter Property="Margin" Value="0,0,8,6" />
-                        <Setter Property="FontSize" Value="13" />
-                    </Style>
-                </TabControl.Resources>
+            <TabControl Grid.Column="1" TabStripPlacement="Left" Padding="0">
                 <TabItem Header="Engine">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="14">
+                        <StackPanel Margin="16">
                             <Border Style="{StaticResource PanelBorder}" Margin="0,0,0,12">
                                 <StackPanel>
-                                    <TextBlock Text="Local spelling engine"
-                                               FontSize="18"
-                                               FontWeight="SemiBold" />
-                                    <TextBlock Text="Uses a bundled English frequency dictionary and a SymSpell-style delete index. It is designed for real-time typing and does not call Ollama or Python."
+                                    <TextBlock Text="Local spelling engine" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Uses a bundled English frequency dictionary, a SymSpell-style delete index, and context ranking. It runs in real time and does not call Ollama or Python."
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,16" />
                                     <TextBlock x:Name="ThresholdValue" />
@@ -151,18 +438,18 @@
                                             TickFrequency="0.01"
                                             IsSnapToTickEnabled="True"
                                             ValueChanged="ThresholdSlider_OnValueChanged" />
-                                    <Separator Margin="0,18,0,18" />
+                                    <Separator />
                                     <CheckBox x:Name="ShowSuggestionPopupCheckBox"
                                               Content="Show floating suggestions while typing"
                                               FontSize="15" />
                                     <TextBlock Text="Suggestions appear near the text cursor and can be clicked to replace the current word."
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,0" />
-                                    <Separator Margin="0,18,0,18" />
+                                    <Separator />
                                     <CheckBox x:Name="EnableLearningCheckBox"
-                                              Content="Learn personal words from my typing"
+                                              Content="Learn personal words and word pairs from my typing"
                                               FontSize="15" />
-                                    <TextBlock Text="Repeated words become trusted vocabulary and can win correction ranking."
+                                    <TextBlock Text="Repeated words become trusted vocabulary, and learned word pairs help context pick the right fix."
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,12" />
                                     <TextBlock x:Name="LearnAfterValue" />
@@ -175,23 +462,23 @@
                                     <TextBlock x:Name="LearnedWordsValue"
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,0" />
-                                    <Separator Margin="0,18,0,18" />
+                                    <Separator />
                                     <CheckBox x:Name="EnableOnnxCheckBox"
                                               Content="Enable ONNX fallback when a trained model is added"
                                               FontSize="15" />
-                                    <TextBlock Text="This is off by default. ONNX is the future upgrade slot, not required for fast v1 correction."
+                                    <TextBlock Text="Off by default. ONNX is the future upgrade slot, not required for fast v1 correction."
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,12" />
                                     <TextBlock Text="ONNX model path" />
                                     <TextBox x:Name="OnnxModelPathTextBox" Margin="0,4,0,0" />
-                                    <Separator Margin="0,18,0,18" />
+                                    <Separator />
                                     <CheckBox x:Name="UseClipboardFallbackCheckBox"
                                               Content="Allow clipboard paste fallback"
                                               FontSize="15" />
                                     <TextBlock Text="Off by default so corrections do not unexpectedly replace your clipboard."
                                                Foreground="{StaticResource Muted}"
                                                Margin="0,8,0,0" />
-                                    <Separator Margin="0,18,0,18" />
+                                    <Separator />
                                     <CheckBox x:Name="DeveloperModeCheckBox"
                                               Content="Developer mode: allow code editors"
                                               FontSize="15" />
@@ -202,15 +489,17 @@
                 </TabItem>
 
                 <TabItem Header="Safety">
-                    <Grid Margin="14">
+                    <Grid Margin="16">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <TextBlock Text="Blocked apps"
-                                   FontSize="16"
-                                   FontWeight="SemiBold"
-                                   Margin="0,0,0,8" />
+                        <StackPanel Margin="0,0,0,10">
+                            <TextBlock Text="Blocked apps" FontSize="16" FontWeight="SemiBold" />
+                            <TextBlock Text="One process name per line. Autocorrect never runs in these apps."
+                                       Foreground="{StaticResource Muted}"
+                                       Margin="0,4,0,0" />
+                        </StackPanel>
                         <TextBox x:Name="BlockedProcessesTextBox"
                                  Grid.Row="1"
                                  AcceptsReturn="True"
@@ -221,7 +510,7 @@
 
                 <TabItem Header="AI overlay">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel Margin="14">
+                        <StackPanel Margin="16">
                             <Border Style="{StaticResource PanelBorder}">
                                 <StackPanel>
                                     <CheckBox x:Name="ShowFloatingPillCheckBox"
@@ -263,14 +552,14 @@
                 </TabItem>
 
                 <TabItem Header="Custom fixes">
-                    <Grid Margin="14">
+                    <Grid Margin="16">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="One correction per line: typo=replacement"
                                    Foreground="{StaticResource Muted}"
-                                   Margin="0,0,0,8" />
+                                   Margin="0,0,0,10" />
                         <TextBox x:Name="CustomCorrectionsTextBox"
                                  Grid.Row="1"
                                  AcceptsReturn="True"
@@ -280,14 +569,14 @@
                 </TabItem>
 
                 <TabItem Header="Ignored words">
-                    <Grid Margin="14">
+                    <Grid Margin="16">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="One word per line. These words will never be corrected."
                                    Foreground="{StaticResource Muted}"
-                                   Margin="0,0,0,8" />
+                                   Margin="0,0,0,10" />
                         <TextBox x:Name="IgnoredWordsTextBox"
                                  Grid.Row="1"
                                  AcceptsReturn="True"
@@ -297,14 +586,14 @@
                 </TabItem>
 
                 <TabItem Header="Protected">
-                    <Grid Margin="14">
+                    <Grid Margin="16">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
                         <TextBlock Text="Words and product names that should never be autocorrected."
                                    Foreground="{StaticResource Muted}"
-                                   Margin="0,0,0,8" />
+                                   Margin="0,0,0,10" />
                         <TextBox x:Name="ProtectedVocabularyTextBox"
                                  Grid.Row="1"
                                  AcceptsReturn="True"
@@ -314,18 +603,23 @@
                 </TabItem>
 
                 <TabItem Header="Learned words">
-                    <Grid Margin="14">
+                    <Grid Margin="16">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <TextBlock Text="Highest-count personal words. Edit carefully; each line is word=count."
-                                   Foreground="{StaticResource Muted}"
-                                   Margin="0,0,0,8" />
-                        <Button Content="Clear learned data"
-                                HorizontalAlignment="Right"
-                                Margin="0,0,0,8"
-                                Click="ClearLearned_OnClick" />
+                        <Grid Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Highest-count personal words. Edit carefully; each line is word=count."
+                                       Foreground="{StaticResource Muted}"
+                                       VerticalAlignment="Center" />
+                            <Button Grid.Column="1"
+                                    Content="Clear learned data"
+                                    Click="ClearLearned_OnClick" />
+                        </Grid>
                         <TextBox x:Name="LearnedWordsTextBox"
                                  Grid.Row="1"
                                  AcceptsReturn="True"
@@ -339,16 +633,10 @@
         <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
-                    Margin="0,16,0,0">
-            <Button Content="Refresh"
-                    Margin="0,0,8,0"
-                    Click="Refresh_OnClick" />
-            <Button Content="Cancel"
-                    Margin="0,0,8,0"
-                    Click="Cancel_OnClick" />
-            <Button Content="Save"
-                    IsDefault="True"
-                    Click="Save_OnClick" />
+                    Margin="0,18,0,0">
+            <Button Content="Refresh" Margin="0,0,8,0" Click="Refresh_OnClick" />
+            <Button Content="Cancel" Margin="0,0,8,0" Click="Cancel_OnClick" />
+            <Button Content="Save" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="Save_OnClick" />
         </StackPanel>
     </Grid>
 </Window>

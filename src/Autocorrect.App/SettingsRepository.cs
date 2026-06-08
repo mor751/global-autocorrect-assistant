@@ -98,6 +98,9 @@ public sealed class SettingsRepository
         settings.RejectedCorrections = new Dictionary<string, int>(
             settings.RejectedCorrections.Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Value > 0),
             StringComparer.OrdinalIgnoreCase);
+        settings.LearnedBigrams = new Dictionary<string, int>(
+            settings.LearnedBigrams.Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Key.Contains(' ') && pair.Value > 0),
+            StringComparer.OrdinalIgnoreCase);
         settings.CustomCorrections = new Dictionary<string, string>(
             settings.CustomCorrections,
             StringComparer.OrdinalIgnoreCase);
@@ -108,9 +111,48 @@ public sealed class SettingsRepository
         settings.FloatingPillDelayMs = Math.Clamp(settings.FloatingPillDelayMs, 300, 2500);
         settings.MinWordsForOverlay = Math.Clamp(settings.MinWordsForOverlay, 3, 40);
         settings.CorrectionHistoryLimit = Math.Clamp(settings.CorrectionHistoryLimit, 20, 5000);
+        if (settings.AiPetLeft is < -200 or > 10000)
+        {
+            settings.AiPetLeft = null;
+        }
+
+        if (settings.AiPetTop is < -200 or > 10000)
+        {
+            settings.AiPetTop = null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.AiPetImagePath) && !File.Exists(settings.AiPetImagePath))
+        {
+            settings.AiPetImagePath = null;
+        }
+
+        settings.AiPetFrames = settings.AiPetFrames.Where(File.Exists).ToList();
+        settings.AiPetFrameIntervalMs = Math.Clamp(settings.AiPetFrameIntervalMs, 40, 1000);
+
+        if (string.IsNullOrWhiteSpace(settings.AiPetName))
+        {
+            settings.AiPetName = "Pet";
+        }
+
         settings.OnnxModelPath = string.IsNullOrWhiteSpace(settings.OnnxModelPath)
             ? null
             : settings.OnnxModelPath.Trim();
+
+        settings.IgnoredProjectFolders = settings.IgnoredProjectFolders.Count == 0
+            ? Autocorrect.Core.Brain.IndexOptions.DefaultIgnoredFolders()
+            : settings.IgnoredProjectFolders.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        settings.MaxIndexedFileSizeKb = Math.Clamp(settings.MaxIndexedFileSizeKb, 16, 2048);
+        settings.MaxIndexedFiles = Math.Clamp(settings.MaxIndexedFiles, 50, 20000);
+        if (string.IsNullOrWhiteSpace(settings.EmbeddingModel))
+        {
+            settings.EmbeddingModel = "nomic-embed-text";
+        }
+
+        if (!string.IsNullOrWhiteSpace(settings.ProjectRoot) && !Directory.Exists(settings.ProjectRoot))
+        {
+            settings.ProjectRoot = null;
+        }
+
         return settings;
     }
 }

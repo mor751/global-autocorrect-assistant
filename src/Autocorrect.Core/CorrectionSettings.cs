@@ -24,21 +24,53 @@ public sealed class CorrectionSettings
 
     public bool ShowFloatingPill { get; set; } = false;
 
+    public bool AiPetEnabled { get; set; } = true;
+
+    public double? AiPetLeft { get; set; }
+
+    public double? AiPetTop { get; set; }
+
+    public string AiPetName { get; set; } = "Pet";
+
+    public string? AiPetImagePath { get; set; }
+
+    public List<string> AiPetFrames { get; set; } = new();
+
+    public int AiPetFrameIntervalMs { get; set; } = 110;
+
     public int FloatingPillDelayMs { get; set; } = 800;
 
     public int MinWordsForOverlay { get; set; } = 8;
 
-    public bool DeveloperModeEnabled { get; set; } = false;
+    public bool DeveloperModeEnabled { get; set; } = true;
 
     public bool LocalOnlyMode { get; set; } = true;
 
-    public string AiProvider { get; set; } = "disabled";
+    public string AiProvider { get; set; } = "ollama";
 
     public string AiEndpoint { get; set; } = "http://localhost:11434";
+
+    public string AiModel { get; set; } = "qwen2.5:3b";
 
     public string? AiApiKeyStorageReference { get; set; }
 
     public bool StartupEnabled { get; set; } = false;
+
+    public bool ProjectBrainEnabled { get; set; } = true;
+
+    public string? ProjectRoot { get; set; }
+
+    public string EmbeddingModel { get; set; } = "nomic-embed-text";
+
+    public int MaxIndexedFileSizeKb { get; set; } = 200;
+
+    public int MaxIndexedFiles { get; set; } = 1500;
+
+    public HashSet<string> IgnoredProjectFolders { get; set; } = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "node_modules", ".git", "dist", "build", ".next", "out", "coverage",
+        ".turbo", ".cache", ".vercel", "bin", "obj", ".vs", ".idea", "vendor", "__pycache__"
+    };
 
     public int CorrectionHistoryLimit { get; set; } = 250;
 
@@ -52,11 +84,6 @@ public sealed class CorrectionSettings
         "powershell",
         "pwsh",
         "WindowsTerminal",
-        "Code",
-        "Cursor",
-        "devenv",
-        "rider64",
-        "idea64",
         "mstsc",
         "vmconnect",
         "VirtualBoxVM"
@@ -84,6 +111,8 @@ public sealed class CorrectionSettings
     public Dictionary<string, string> LearnedCorrections { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<string, int> RejectedCorrections { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Dictionary<string, int> LearnedBigrams { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     public Dictionary<string, string> CustomCorrections { get; set; } = new(StringComparer.OrdinalIgnoreCase)
     {

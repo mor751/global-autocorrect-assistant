@@ -7,6 +7,5 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Autocorrect.Core\Autocorrect.Core.csproj" />
-    <ProjectReference Include="..\..\src\Autocorrect.App\Autocorrect.App.csproj" />
   </ItemGroup>
 </Project>

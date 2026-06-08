@@ -8,11 +8,13 @@ namespace Autocorrect.App;
 public sealed class CompositeAiRewriteService : IAiRewriteService, IDisposable
 {
     private readonly LocalRewriteService _local = new();
+    private readonly OllamaRewriteService _ollama = new();
     private readonly OpenAiCompatibleRewriteService _remote = new();
 
+    // On-demand rewriting is available whenever a provider other than "disabled" is selected.
     public bool IsEnabled(CorrectionSettings settings)
     {
-        return settings.AiOverlayEnabled && !settings.AiProvider.Equals("disabled", StringComparison.OrdinalIgnoreCase);
+        return !settings.AiProvider.Equals("disabled", StringComparison.OrdinalIgnoreCase);
     }
 
     public Task<AiRewriteResult?> RewriteAsync(
@@ -20,22 +22,139 @@ public sealed class CompositeAiRewriteService : IAiRewriteService, IDisposable
         CorrectionSettings settings,
         CancellationToken cancellationToken)
     {
-        if (!IsEnabled(settings) || !request.AppContext.IsAllowedForAiOverlay || request.AppContext.IsSensitive)
+        if (!IsEnabled(settings) || request.AppContext.IsSensitive)
         {
             return Task.FromResult<AiRewriteResult?>(null);
         }
 
-        if (settings.LocalOnlyMode || settings.AiProvider.Equals("local", StringComparison.OrdinalIgnoreCase))
+        return settings.AiProvider.ToLowerInvariant() switch
         {
-            return Task.FromResult<AiRewriteResult?>(_local.Rewrite(request));
-        }
-
-        return _remote.RewriteAsync(request, settings, cancellationToken);
+            "ollama" => _ollama.RewriteAsync(request, settings, cancellationToken),
+            "openai" or "remote" when !settings.LocalOnlyMode => _remote.RewriteAsync(request, settings, cancellationToken),
+            _ => Task.FromResult<AiRewriteResult?>(_local.Rewrite(request))
+        };
     }
 
     public void Dispose()
     {
+        _ollama.Dispose();
         _remote.Dispose();
+    }
+}
+
+// Shared, model-agnostic instructions and token math for any LLM-backed rewrite provider.
+public static class RewriteInstructions
+{
+    public static string For(AiRewriteAction action)
+    {
+        return action switch
+        {
+            AiRewriteAction.FixTyposOnly => "Fix only spelling and grammar. Keep wording, meaning, and style unchanged.",
+            AiRewriteAction.SmartOptimize => "Fix all spelling and grammar, sharpen the wording, and compress the text into a clear, token-efficient prompt for an AI assistant. Preserve the exact intent and every concrete detail while removing filler and redundancy.",
+            AiRewriteAction.ImproveClarity => "Rewrite the text to be clearer and easier to read while preserving all meaning and details.",
+            AiRewriteAction.OptimizePrompt => "Rewrite this into a clear, well-structured, token-efficient prompt for an AI assistant. Preserve the intent and every concrete detail, but remove filler and redundancy so it uses fewer tokens.",
+            AiRewriteAction.CompressTokens => "Rewrite this prompt to use as few tokens as possible while preserving the exact meaning, intent, and all concrete details. Remove filler and redundancy.",
+            AiRewriteAction.MakeProfessional => "Rewrite the text in a professional tone while preserving meaning.",
+            AiRewriteAction.MakeDirect => "Rewrite the text to be direct and concise while preserving meaning.",
+            AiRewriteAction.CursorCodingPrompt => "Rewrite this into a precise coding instruction for an AI code assistant: state the goal, constraints, and expected change clearly.",
+            AiRewriteAction.VideoGenerationPrompt => "Rewrite this into a vivid, concise video-generation prompt describing subject, action, style, and camera.",
+            _ => "Improve this text while preserving meaning."
+        };
+    }
+
+    public static string SystemPrompt(AiRewriteAction action)
+    {
+        return For(action) + " Output ONLY the rewritten text with no preamble, quotes, or explanation.";
+    }
+
+    // Rough token estimate (~4 chars/token) used to report savings without a tokenizer dependency.
+    public static int ReductionPercent(string original, string rewritten)
+    {
+        if (string.IsNullOrWhiteSpace(original))
+        {
+            return 0;
+        }
+
+        var before = Math.Max(1, original.Length);
+        return Math.Max(0, (int)Math.Round((1 - rewritten.Length / (double)before) * 100));
+    }
+}
+
+public sealed class OllamaRewriteService : IDisposable
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(60) };
+
+    public async Task<AiRewriteResult?> RewriteAsync(
+        AiRewriteRequest request,
+        CorrectionSettings settings,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Text))
+        {
+            return null;
+        }
+
+        var endpoint = (string.IsNullOrWhiteSpace(settings.AiEndpoint) ? "http://localhost:11434" : settings.AiEndpoint).TrimEnd('/');
+        var model = string.IsNullOrWhiteSpace(settings.AiModel) ? "qwen2.5:3b" : settings.AiModel;
+        var payload = new
+        {
+            model,
+            stream = false,
+            options = new { temperature = 0.2 },
+            messages = new[]
+            {
+                new { role = "system", content = RewriteInstructions.SystemPrompt(request.Action) },
+                new { role = "user", content = request.Text }
+            }
+        };
+
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync($"{endpoint}/api/chat", payload, JsonOptions, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (!document.RootElement.TryGetProperty("message", out var message) ||
+                !message.TryGetProperty("content", out var content))
+            {
+                return null;
+            }
+
+            var rewritten = CleanOutput(content.GetString());
+            if (string.IsNullOrWhiteSpace(rewritten))
+            {
+                return null;
+            }
+
+            var reduction = RewriteInstructions.ReductionPercent(request.Text, rewritten);
+            return new AiRewriteResult(rewritten, $"Local Ollama model ({model}). Nothing left your machine.", reduction, 0.85);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // Strips wrapping quotes/whitespace that small models sometimes add around the answer.
+    private static string CleanOutput(string? raw)
+    {
+        var text = (raw ?? string.Empty).Trim();
+        if (text.Length >= 2 && text[0] == '"' && text[^1] == '"')
+        {
+            text = text[1..^1].Trim();
+        }
+
+        return text;
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
     }
 }
 
@@ -46,6 +165,7 @@ public sealed class LocalRewriteService
         var fixedText = FixCommonTypos(request.Text);
         var rewritten = request.Action switch
         {
+            AiRewriteAction.SmartOptimize => Compress(OptimizePrompt(fixedText)),
             AiRewriteAction.OptimizePrompt => OptimizePrompt(fixedText),
             AiRewriteAction.CompressTokens => Compress(fixedText),
             AiRewriteAction.MakeProfessional => MakeProfessional(fixedText),
@@ -55,7 +175,7 @@ public sealed class LocalRewriteService
             _ => fixedText
         };
 
-        var reduction = EstimateReduction(request.Text, rewritten);
+        var reduction = RewriteInstructions.ReductionPercent(request.Text, rewritten);
         return new AiRewriteResult(rewritten, "Local rewrite. No text was sent to an external service.", reduction, 0.78);
     }
 
@@ -140,16 +260,6 @@ public sealed class LocalRewriteService
         cleaned = char.ToUpperInvariant(cleaned[0]) + cleaned[1..];
         return cleaned.EndsWith('.') || cleaned.EndsWith('!') || cleaned.EndsWith('?') ? cleaned : cleaned + ".";
     }
-
-    private static int EstimateReduction(string original, string rewritten)
-    {
-        if (string.IsNullOrWhiteSpace(original))
-        {
-            return 0;
-        }
-
-        return Math.Max(0, (int)Math.Round((1 - rewritten.Length / (double)original.Length) * 100));
-    }
 }
 
 public sealed class OpenAiCompatibleRewriteService : IDisposable
@@ -167,33 +277,46 @@ public sealed class OpenAiCompatibleRewriteService : IDisposable
             return null;
         }
 
-        var instruction = request.Action switch
-        {
-            AiRewriteAction.OptimizePrompt => "Optimize this as a clear, concise prompt.",
-            AiRewriteAction.CompressTokens => "Compress this text while preserving meaning.",
-            AiRewriteAction.MakeProfessional => "Rewrite professionally.",
-            AiRewriteAction.MakeDirect => "Rewrite directly and concisely.",
-            _ => "Fix typos and improve clarity."
-        };
-
         var payload = new
         {
-            model = "gpt-4o-mini",
+            model = string.IsNullOrWhiteSpace(settings.AiModel) ? "gpt-4o-mini" : settings.AiModel,
             messages = new[]
             {
-                new { role = "system", content = instruction },
+                new { role = "system", content = RewriteInstructions.SystemPrompt(request.Action) },
                 new { role = "user", content = request.Text }
             }
         };
 
-        using var response = await _httpClient.PostAsJsonAsync(settings.AiEndpoint, payload, JsonOptions, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(settings.AiEndpoint, payload, JsonOptions, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+            if (!document.RootElement.TryGetProperty("choices", out var choices) ||
+                choices.GetArrayLength() == 0 ||
+                !choices[0].TryGetProperty("message", out var message) ||
+                !message.TryGetProperty("content", out var content))
+            {
+                return null;
+            }
+
+            var rewritten = (content.GetString() ?? string.Empty).Trim();
+            if (string.IsNullOrWhiteSpace(rewritten))
+            {
+                return null;
+            }
+
+            return new AiRewriteResult(rewritten, "Cloud provider response.", RewriteInstructions.ReductionPercent(request.Text, rewritten), 0.8);
+        }
+        catch (Exception)
         {
             return null;
         }
-
-        var json = await response.Content.ReadAsStringAsync(cancellationToken);
-        return new AiRewriteResult(json, "OpenAI-compatible provider response.", 0, 0.7);
     }
 
     public void Dispose()

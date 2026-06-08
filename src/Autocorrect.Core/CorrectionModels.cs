@@ -44,6 +44,7 @@ public enum AiRewriteAction
     ImproveClarity,
     OptimizePrompt,
     CompressTokens,
+    SmartOptimize,
     MakeProfessional,
     MakeDirect,
     TranslateHebrewEnglish,
@@ -101,6 +102,8 @@ public interface ITextReplacer
 public interface IWordLearningStore
 {
     void RecordTypedWord(string word);
+
+    void RecordWordPair(string previousWord, string word);
 
     void RecordAcceptedCorrection(string original, string replacement);
 
@@ -172,6 +175,10 @@ public sealed class NullWordLearningStore : IWordLearningStore
     }
 
     public void RecordTypedWord(string word)
+    {
+    }
+
+    public void RecordWordPair(string previousWord, string word)
     {
     }
 
