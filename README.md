@@ -54,6 +54,33 @@ Ctrl+Alt+O          Open optimize-prompt rewrite modal
 Ctrl+Alt+S          Open compress-tokens rewrite modal
 ```
 
+## Woody project brain
+
+Woody can compile messy coding prompts into project-aware prompts for Codex, Cursor, Claude Code, and similar agents.
+
+Local setup:
+
+```powershell
+docker run -p 6333:6333 qdrant/qdrant
+pip install fastembed
+ollama pull gemma3:4b
+```
+
+Flow:
+
+1. Click Woody.
+2. Choose Folder.
+3. Wait for indexing to finish.
+4. Press `Ctrl+Alt+O` or click Fix Prompt.
+
+The first folder selection scans and indexes the project. Later prompt optimization does not rescan the whole folder; it embeds only the prompt, searches Qdrant, sends compact retrieved context to `gemma3:4b`, and shows the optimized prompt. If Qdrant, FastEmbed, or Gemma is unavailable, Woody falls back locally and shows the fallback mode in Dashboard / View RAG.
+
+Project brain data is stored under:
+
+```text
+%APPDATA%\GlobalAutocorrect\brain
+```
+
 ## Local data
 
 Settings and learning data are stored under:

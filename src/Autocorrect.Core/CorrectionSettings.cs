@@ -30,7 +30,7 @@ public sealed class CorrectionSettings
 
     public double? AiPetTop { get; set; }
 
-    public string AiPetName { get; set; } = "Pet";
+    public string AiPetName { get; set; } = "Woody";
 
     public string? AiPetImagePath { get; set; }
 
@@ -52,6 +52,8 @@ public sealed class CorrectionSettings
 
     public string AiModel { get; set; } = "qwen2.5:3b";
 
+    public string WriterModel { get; set; } = "gemma3:4b";
+
     public string? AiApiKeyStorageReference { get; set; }
 
     public bool StartupEnabled { get; set; } = false;
@@ -60,7 +62,25 @@ public sealed class CorrectionSettings
 
     public string? ProjectRoot { get; set; }
 
-    public string EmbeddingModel { get; set; } = "nomic-embed-text";
+    public string VectorDbProvider { get; set; } = "QdrantLocal";
+
+    public string QdrantUrl { get; set; } = "http://localhost:6333";
+
+    public string EmbeddingProvider { get; set; } = "FastEmbed";
+
+    public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
+
+    public string FastEmbedSidecarUrl { get; set; } = "http://127.0.0.1:8765";
+
+    public string PythonExecutable { get; set; } = "python";
+
+    public int EmbeddingBatchSize { get; set; } = 32;
+
+    public int RetrievalTopK { get; set; } = 12;
+
+    public int MaxInitialIndexSeconds { get; set; } = 180;
+
+    public int MaxInitialChunks { get; set; } = 8000;
 
     public int MaxIndexedFileSizeKb { get; set; } = 200;
 

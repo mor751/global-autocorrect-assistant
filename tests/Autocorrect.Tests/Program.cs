@@ -8,6 +8,10 @@ using Autocorrect.Core.Brain;
 var tests = new (string Name, Action Run)[]
 {
     ("brain indexer detects stack and ignores secrets", BrainIndexerDetectsStackAndIgnoresSecrets),
+    ("brain detailed index creates hashed chunks", BrainDetailedIndexCreatesHashedChunks),
+    ("markdown chunker splits by headings", MarkdownChunkerSplitsByHeadings),
+    ("prompt compiler fallback does not invent files", PromptCompilerFallbackDoesNotInventFiles),
+    ("qdrant unavailable is reported gracefully", QdrantUnavailableIsReportedGracefully),
     ("brain retrieval finds login file for animation prompt", BrainRetrievalFindsLoginFile),
     ("prompt analyzer flags vague prompt", PromptAnalyzerFlagsVaguePrompt),
     ("smart rewriter works without ollama", SmartRewriterWorksWithoutOllama),
@@ -342,6 +346,87 @@ static void BrainRetrievalFindsLoginFile()
     }
 }
 
+static void BrainDetailedIndexCreatesHashedChunks()
+{
+    var root = CreateSampleProject();
+    try
+    {
+        var snapshot = new ProjectIndexer().IndexDetailed(root, new IndexOptions());
+
+        Assert.True(snapshot.Brain.Files.Count > 0, "Expected indexed files.");
+        Assert.True(snapshot.Chunks.Count > 0, "Expected project chunks.");
+        Assert.True(snapshot.Chunks.All(chunk => !string.IsNullOrWhiteSpace(chunk.FileHash)), "Expected file hashes.");
+        Assert.True(snapshot.Chunks.All(chunk => !string.IsNullOrWhiteSpace(chunk.ChunkHash)), "Expected chunk hashes.");
+        Assert.True(snapshot.Chunks.Any(chunk => chunk.FilePath.Contains("LoginForm", StringComparison.OrdinalIgnoreCase)), "Expected LoginForm chunk.");
+        Assert.True(snapshot.Brain.Files.All(file => !file.Path.EndsWith(".env", StringComparison.OrdinalIgnoreCase)), ".env must be ignored.");
+    }
+    finally
+    {
+        TryDelete(root);
+    }
+}
+
+static void MarkdownChunkerSplitsByHeadings()
+{
+    var root = Path.Combine(Path.GetTempPath(), "chunk-test-" + Guid.NewGuid().ToString("N")[..8]);
+    Directory.CreateDirectory(root);
+    var path = Path.Combine(root, "README.md");
+    File.WriteAllText(path, "# Auth\nLogin details\n\n## Billing\nPayment details\n");
+
+    try
+    {
+        var scanner = new ProjectScanner();
+        var files = scanner.Scan(root, new IndexOptions(), out _);
+        var brain = new ProjectAnalyzer().Analyze(root, files, new IndexOptions());
+        var source = files.Single(file => file.RelativePath == "README.md");
+        var summary = brain.Files.Single(file => file.Path == "README.md");
+        var chunks = new ProjectChunker().Chunk(source, summary, 10);
+
+        Assert.True(chunks.Count >= 2, "Expected heading chunks.");
+        Assert.True(chunks.Any(chunk => chunk.Symbol.Contains("Auth", StringComparison.OrdinalIgnoreCase)), "Expected Auth heading chunk.");
+    }
+    finally
+    {
+        TryDelete(root);
+    }
+}
+
+static void PromptCompilerFallbackDoesNotInventFiles()
+{
+    var compiler = new PromptCompilerService(new FakeOllamaClient());
+    var result = compiler.CompileAsync(new PromptCompilerRequest
+    {
+        OriginalPrompt = "fix the login thing and maek it better",
+        TargetAgent = PromptTargetAgent.Codex,
+        Brain = new ProjectBrainData
+        {
+            Stack = new ProjectStack { Framework = "Next.js", Language = "TypeScript" }
+        },
+        Retrieval = new RetrievalResponse
+        {
+            RetrievalMode = RetrievalMode.KeywordFallback,
+            Results = new List<RetrievalResult>
+            {
+                new() { FilePath = "src/components/LoginForm.tsx", Score = 0.91, ContentPreview = "LoginForm component" },
+                new() { FilePath = "src/lib/auth.ts", Score = 0.86, ContentPreview = "auth helpers" }
+            }
+        }
+    }, writerAvailable: false, CancellationToken.None).GetAwaiter().GetResult();
+
+    Assert.True(result.OptimizedPrompt.Contains("src/components/LoginForm.tsx", StringComparison.Ordinal), "Expected real retrieved file.");
+    Assert.True(result.OptimizedPrompt.Contains("src/lib/auth.ts", StringComparison.Ordinal), "Expected real retrieved file.");
+    Assert.False(result.OptimizedPrompt.Contains("src/app/api/auth/route.ts", StringComparison.Ordinal), "Must not invent files.");
+}
+
+static void QdrantUnavailableIsReportedGracefully()
+{
+    using var store = new QdrantVectorStore("http://localhost:63339");
+    var stats = store.GetStatsAsync("woody_project_missing", CancellationToken.None).GetAwaiter().GetResult();
+
+    Assert.False(stats.IsAvailable, "Expected unavailable Qdrant status.");
+    Assert.True(!string.IsNullOrWhiteSpace(stats.Error), "Expected clear error.");
+}
+
 static void PromptAnalyzerFlagsVaguePrompt()
 {
     var analysis = new PromptAnalyzer().Analyze(
@@ -441,4 +526,15 @@ internal static class Assert
             throw new InvalidOperationException("Expected non-null value.");
         }
     }
+}
+
+internal sealed class FakeOllamaClient : IOllamaClient
+{
+    public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
+    public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
+    public Task<string?> GenerateAsync(string prompt, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
+    public Task<float[]?> EmbedAsync(string text, CancellationToken cancellationToken) => Task.FromResult<float[]?>(null);
 }

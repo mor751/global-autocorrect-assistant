@@ -20,4 +20,17 @@ public static class BrainStorage
         var bytes = SHA1.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(bytes)[..16];
     }
+
+    public static string ProjectDirectory(string baseDirectory, string projectRoot)
+    {
+        var directory = Path.Combine(BrainDirectory(baseDirectory), "projects", ProjectKey(projectRoot));
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    public static string ProjectIndexPath(string baseDirectory, string projectRoot) =>
+        Path.Combine(ProjectDirectory(baseDirectory, projectRoot), "project-index.json");
+
+    public static string CollectionName(string projectRoot) =>
+        $"woody_project_{ProjectKey(projectRoot).ToLowerInvariant()}";
 }

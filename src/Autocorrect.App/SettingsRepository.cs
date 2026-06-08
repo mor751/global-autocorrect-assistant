@@ -129,9 +129,11 @@ public sealed class SettingsRepository
         settings.AiPetFrames = settings.AiPetFrames.Where(File.Exists).ToList();
         settings.AiPetFrameIntervalMs = Math.Clamp(settings.AiPetFrameIntervalMs, 40, 1000);
 
-        if (string.IsNullOrWhiteSpace(settings.AiPetName))
+        if (string.IsNullOrWhiteSpace(settings.AiPetName) ||
+            settings.AiPetName.Equals("Pet", StringComparison.OrdinalIgnoreCase) ||
+            settings.AiPetName.Equals("Beaver", StringComparison.OrdinalIgnoreCase))
         {
-            settings.AiPetName = "Pet";
+            settings.AiPetName = "Woody";
         }
 
         settings.OnnxModelPath = string.IsNullOrWhiteSpace(settings.OnnxModelPath)
@@ -145,8 +147,48 @@ public sealed class SettingsRepository
         settings.MaxIndexedFiles = Math.Clamp(settings.MaxIndexedFiles, 50, 20000);
         if (string.IsNullOrWhiteSpace(settings.EmbeddingModel))
         {
-            settings.EmbeddingModel = "nomic-embed-text";
+            settings.EmbeddingModel = "BAAI/bge-small-en-v1.5";
         }
+
+        if (string.IsNullOrWhiteSpace(settings.VectorDbProvider))
+        {
+            settings.VectorDbProvider = "QdrantLocal";
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.QdrantUrl))
+        {
+            settings.QdrantUrl = "http://localhost:6333";
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.EmbeddingProvider))
+        {
+            settings.EmbeddingProvider = "FastEmbed";
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.FastEmbedSidecarUrl))
+        {
+            settings.FastEmbedSidecarUrl = "http://127.0.0.1:8765";
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.PythonExecutable))
+        {
+            settings.PythonExecutable = "python";
+        }
+
+        if (string.IsNullOrWhiteSpace(settings.WriterModel))
+        {
+            settings.WriterModel = "gemma3:4b";
+        }
+
+        if (settings.AiModel.Equals("qwen2.5:3b", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.AiModel = settings.WriterModel;
+        }
+
+        settings.EmbeddingBatchSize = Math.Clamp(settings.EmbeddingBatchSize, 1, 128);
+        settings.RetrievalTopK = Math.Clamp(settings.RetrievalTopK, 3, 40);
+        settings.MaxInitialIndexSeconds = Math.Clamp(settings.MaxInitialIndexSeconds, 30, 900);
+        settings.MaxInitialChunks = Math.Clamp(settings.MaxInitialChunks, 100, 100000);
 
         if (!string.IsNullOrWhiteSpace(settings.ProjectRoot) && !Directory.Exists(settings.ProjectRoot))
         {

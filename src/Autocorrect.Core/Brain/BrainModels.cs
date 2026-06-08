@@ -46,19 +46,179 @@ public enum EdgeType
     UsuallyEditedWith
 }
 
+public enum ProjectBrainStatus
+{
+    NoFolder,
+    FolderSelected,
+    QuickIndexing,
+    SemanticIndexing,
+    Ready,
+    PartialReady,
+    Error,
+    QdrantUnavailable,
+    EmbeddingUnavailable,
+    ReindexRequired
+}
+
+public enum RetrievalMode
+{
+    SemanticQdrant,
+    HybridQdrantKeyword,
+    KeywordFallback,
+    NoBrain
+}
+
 public sealed class ProjectFileSummary
 {
+    public string Id { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
     public string Path { get; set; } = string.Empty;
     public string AbsolutePath { get; set; } = string.Empty;
     public string Extension { get; set; } = string.Empty;
+    public string Language { get; set; } = string.Empty;
     public string Summary { get; set; } = string.Empty;
     public FileRole Role { get; set; } = FileRole.Unknown;
     public List<string> Imports { get; set; } = new();
     public List<string> Exports { get; set; } = new();
     public List<string> Symbols { get; set; } = new();
+    public string DetectedRole { get; set; } = string.Empty;
+    public double Importance { get; set; }
+    public string Hash { get; set; } = string.Empty;
     public DateTimeOffset LastModified { get; set; }
     public long SizeBytes { get; set; }
     public List<string> PreviewChunks { get; set; } = new();
+}
+
+public sealed class ProjectChunk
+{
+    public string Id { get; set; } = string.Empty;
+    public string ProjectId { get; set; } = string.Empty;
+    public string ProjectRoot { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string Folder { get; set; } = string.Empty;
+    public string Extension { get; set; } = string.Empty;
+    public string Language { get; set; } = string.Empty;
+    public string ChunkType { get; set; } = "text";
+    public string Symbol { get; set; } = string.Empty;
+    public string ParentSymbol { get; set; } = string.Empty;
+    public int StartLine { get; set; }
+    public int EndLine { get; set; }
+    public string Content { get; set; } = string.Empty;
+    public string ContentPreview { get; set; } = string.Empty;
+    public string MetadataJson { get; set; } = "{}";
+    public List<string> Imports { get; set; } = new();
+    public List<string> Exports { get; set; } = new();
+    public List<string> Tags { get; set; } = new();
+    public string FileHash { get; set; } = string.Empty;
+    public string ChunkHash { get; set; } = string.Empty;
+    public double Importance { get; set; }
+    public DateTimeOffset IndexedAt { get; set; }
+
+    public string EmbeddedText()
+    {
+        var symbol = string.IsNullOrWhiteSpace(Symbol) ? "none" : Symbol;
+        var imports = Imports.Count == 0 ? "none" : string.Join(", ", Imports.Take(12));
+        return $"File: {FilePath}\nLanguage: {Language}\nType: {ChunkType}\nSymbol: {symbol}\nImports: {imports}\n\nCode/Text:\n{Content}";
+    }
+}
+
+public sealed class ProjectIndexSnapshot
+{
+    public ProjectBrainData Brain { get; set; } = new();
+    public List<ProjectChunk> Chunks { get; set; } = new();
+    public int SkippedFiles { get; set; }
+    public List<string> SkippedReasons { get; set; } = new();
+}
+
+public sealed class ProjectIndexMetadata
+{
+    public string ProjectId { get; set; } = string.Empty;
+    public string ProjectRoot { get; set; } = string.Empty;
+    public string ProjectName { get; set; } = string.Empty;
+    public string Framework { get; set; } = "unknown";
+    public string EmbeddingProvider { get; set; } = "FastEmbed";
+    public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
+    public int VectorDimension { get; set; }
+    public string VectorDbProvider { get; set; } = "QdrantLocal";
+    public string QdrantUrl { get; set; } = "http://localhost:6333";
+    public string QdrantCollection { get; set; } = string.Empty;
+    public ProjectBrainStatus Status { get; set; } = ProjectBrainStatus.NoFolder;
+    public ProjectBrainStatus QuickBrainStatus { get; set; } = ProjectBrainStatus.NoFolder;
+    public ProjectBrainStatus SemanticBrainStatus { get; set; } = ProjectBrainStatus.NoFolder;
+    public ProjectBrainStatus DeepBrainStatus { get; set; } = ProjectBrainStatus.FolderSelected;
+    public int TotalFiles { get; set; }
+    public int IndexedFiles { get; set; }
+    public int TotalChunks { get; set; }
+    public int EmbeddedChunks { get; set; }
+    public int FailedChunks { get; set; }
+    public int SkippedFiles { get; set; }
+    public DateTimeOffset? LastIndexedAt { get; set; }
+    public string? LastError { get; set; }
+    public Dictionary<string, string> FileHashes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> ChunkHashes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public string CurrentRagMode()
+    {
+        return Status switch
+        {
+            ProjectBrainStatus.Ready => "Semantic + keyword",
+            ProjectBrainStatus.PartialReady => "Partial semantic + keyword",
+            ProjectBrainStatus.QdrantUnavailable => "Keyword fallback",
+            ProjectBrainStatus.EmbeddingUnavailable => "Keyword fallback",
+            _ => "No brain"
+        };
+    }
+}
+
+public sealed class RetrievalResult
+{
+    public double Score { get; set; }
+    public string FilePath { get; set; } = string.Empty;
+    public string ChunkType { get; set; } = string.Empty;
+    public string Symbol { get; set; } = string.Empty;
+    public int StartLine { get; set; }
+    public int EndLine { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string ContentPreview { get; set; } = string.Empty;
+    public string Content { get; set; } = string.Empty;
+    public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class RetrievalResponse
+{
+    public string Query { get; set; } = string.Empty;
+    public RetrievalMode RetrievalMode { get; set; } = RetrievalMode.NoBrain;
+    public List<RetrievalResult> Results { get; set; } = new();
+}
+
+public enum PromptTargetAgent
+{
+    Generic,
+    Cursor,
+    Codex,
+    ClaudeCode
+}
+
+public sealed class PromptCompilerRequest
+{
+    public string OriginalPrompt { get; set; } = string.Empty;
+    public PromptTargetAgent TargetAgent { get; set; } = PromptTargetAgent.Codex;
+    public ProjectBrainData? Brain { get; set; }
+    public RetrievalResponse Retrieval { get; set; } = new();
+    public IReadOnlyList<string> UserConstraints { get; set; } = Array.Empty<string>();
+}
+
+public sealed class PromptCompilerResult
+{
+    public string OptimizedPrompt { get; set; } = string.Empty;
+    public List<string> RelevantFiles { get; set; } = new();
+    public List<string> Tasks { get; set; } = new();
+    public List<string> Constraints { get; set; } = new();
+    public string TokenSavingReason { get; set; } = string.Empty;
+    public string RetrievalSummary { get; set; } = string.Empty;
+    public List<string> Warnings { get; set; } = new();
+    public bool UsedWriterModel { get; set; }
 }
 
 public sealed class ProjectStack

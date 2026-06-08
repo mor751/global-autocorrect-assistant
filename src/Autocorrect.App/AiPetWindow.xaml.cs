@@ -2,6 +2,8 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Media3D;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Autocorrect.Core;
@@ -16,11 +18,18 @@ public partial class AiPetWindow : Window
     private readonly SettingsRepository _settingsRepository;
     private readonly Action<AiRewriteAction, nint> _runAction;
     private readonly Action _openDashboard;
+    private readonly Action _chooseFolder;
+    private readonly Func<Task> _reindexProject;
+    private readonly Func<Task> _showQdrantStatus;
+    private readonly Action _openRag;
     private readonly Action _setPetImage;
+    private readonly Func<string?> _projectFolderProvider;
+    private readonly Func<string> _projectStatusProvider;
     private readonly DispatcherTimer _frameTimer = new();
     private BitmapImage[] _frames = Array.Empty<BitmapImage>();
     private int _frameIndex;
     private WpfPoint _dragStart;
+    private WpfPoint _windowStart;
     private bool _isDragging;
     private nint _targetWindow;
 
@@ -29,6 +38,12 @@ public partial class AiPetWindow : Window
         SettingsRepository settingsRepository,
         Action<AiRewriteAction, nint> runAction,
         Action openDashboard,
+        Action chooseFolder,
+        Func<Task> reindexProject,
+        Func<Task> showQdrantStatus,
+        Action openRag,
+        Func<string?> projectFolderProvider,
+        Func<string> projectStatusProvider,
         Action setPetImage)
     {
         InitializeComponent();
@@ -36,6 +51,12 @@ public partial class AiPetWindow : Window
         _settingsRepository = settingsRepository;
         _runAction = runAction;
         _openDashboard = openDashboard;
+        _chooseFolder = chooseFolder;
+        _reindexProject = reindexProject;
+        _showQdrantStatus = showQdrantStatus;
+        _openRag = openRag;
+        _projectFolderProvider = projectFolderProvider;
+        _projectStatusProvider = projectStatusProvider;
         _setPetImage = setPetImage;
         _frameTimer.Tick += OnFrameTick;
         SourceInitialized += OnSourceInitialized;
@@ -61,7 +82,7 @@ public partial class AiPetWindow : Window
     {
         _frameTimer.Stop();
         _frames = Array.Empty<BitmapImage>();
-        PetRoot.ToolTip = string.IsNullOrWhiteSpace(_settings.AiPetName) ? "AI Pet" : _settings.AiPetName;
+        PetRoot.ToolTip = string.IsNullOrWhiteSpace(_settings.AiPetName) ? "Woody" : _settings.AiPetName;
 
         var framePaths = _settings.AiPetFrames.Where(File.Exists).ToList();
         if (framePaths.Count > 1)
@@ -145,34 +166,54 @@ public partial class AiPetWindow : Window
 
     private void PetRoot_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (IsInsidePopup(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        ActionsPopup.IsOpen = false;
         _targetWindow = NativeMethods.GetForegroundWindow();
-        _dragStart = e.GetPosition(this);
+        _dragStart = PointToScreenDip(e.GetPosition(this));
+        _windowStart = new WpfPoint(Left, Top);
         _isDragging = false;
         PetRoot.CaptureMouse();
+        e.Handled = true;
     }
 
     private void PetRoot_OnMouseMove(object sender, WpfMouseEventArgs e)
     {
+        if (IsInsidePopup(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
         if (!PetRoot.IsMouseCaptured || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
 
-        var position = PointToScreen(e.GetPosition(this));
-        var nextLeft = position.X - _dragStart.X;
-        var nextTop = position.Y - _dragStart.Y;
-        if (!_isDragging && Math.Abs(nextLeft - Left) + Math.Abs(nextTop - Top) < 4)
+        var position = PointToScreenDip(e.GetPosition(this));
+        var nextLeft = _windowStart.X + position.X - _dragStart.X;
+        var nextTop = _windowStart.Y + position.Y - _dragStart.Y;
+        if (!_isDragging && Math.Abs(nextLeft - _windowStart.X) + Math.Abs(nextTop - _windowStart.Y) < 4)
         {
             return;
         }
 
         _isDragging = true;
+        ActionsPopup.IsOpen = false;
         Left = Math.Clamp(nextLeft, SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - Width);
         Top = Math.Clamp(nextTop, SystemParameters.VirtualScreenTop, SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - Height);
+        e.Handled = true;
     }
 
     private void PetRoot_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (IsInsidePopup(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
         PetRoot.ReleaseMouseCapture();
         if (_isDragging)
         {
@@ -180,8 +221,9 @@ public partial class AiPetWindow : Window
             return;
         }
 
-        PopupTitle.Text = string.IsNullOrWhiteSpace(_settings.AiPetName) ? "Beaver" : _settings.AiPetName;
-        ActionsPopup.IsOpen = !ActionsPopup.IsOpen;
+        ActionsPopup.IsOpen = false;
+        _openDashboard();
+        e.Handled = true;
     }
 
     private void Action_OnClick(object sender, RoutedEventArgs e)
@@ -199,6 +241,36 @@ public partial class AiPetWindow : Window
         _openDashboard();
     }
 
+    private void ChooseFolder_OnClick(object sender, RoutedEventArgs e)
+    {
+        ActionsPopup.IsOpen = false;
+        _chooseFolder();
+    }
+
+    private void FixPrompt_OnClick(object sender, RoutedEventArgs e)
+    {
+        ActionsPopup.IsOpen = false;
+        _runAction(AiRewriteAction.SmartOptimize, _targetWindow);
+    }
+
+    private void ViewRag_OnClick(object sender, RoutedEventArgs e)
+    {
+        ActionsPopup.IsOpen = false;
+        _openRag();
+    }
+
+    private async void Reindex_OnClick(object sender, RoutedEventArgs e)
+    {
+        ActionsPopup.IsOpen = false;
+        await _reindexProject();
+    }
+
+    private async void QdrantStatus_OnClick(object sender, RoutedEventArgs e)
+    {
+        ActionsPopup.IsOpen = false;
+        await _showQdrantStatus();
+    }
+
     private void SetImage_OnClick(object sender, RoutedEventArgs e)
     {
         ActionsPopup.IsOpen = false;
@@ -210,5 +282,44 @@ public partial class AiPetWindow : Window
         _settings.AiPetLeft = Left;
         _settings.AiPetTop = Top;
         _settingsRepository.Save(_settings);
+    }
+
+    private void RefreshProjectStatus()
+    {
+        var folder = _projectFolderProvider();
+        ProjectPathText.Text = string.IsNullOrWhiteSpace(folder) ? "No project folder selected" : folder;
+        ProjectStatusText.Text = _projectStatusProvider();
+    }
+
+    private WpfPoint PointToScreenDip(WpfPoint point)
+    {
+        var screenPoint = PointToScreen(point);
+        var source = PresentationSource.FromVisual(this);
+        return source?.CompositionTarget is null
+            ? screenPoint
+            : source.CompositionTarget.TransformFromDevice.Transform(screenPoint);
+    }
+
+    private bool IsInsidePopup(DependencyObject? source)
+    {
+        if (source is null || !ActionsPopup.IsOpen || ActionsPopupCard is null)
+        {
+            return false;
+        }
+
+        var current = source;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, ActionsPopupCard))
+            {
+                return true;
+            }
+
+            current = current is Visual or Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 }

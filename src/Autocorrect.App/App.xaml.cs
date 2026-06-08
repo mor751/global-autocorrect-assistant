@@ -21,10 +21,15 @@ public partial class App : Application
     private DashboardWindow? _dashboardWindow;
     private ProjectBrainService? _projectBrain;
     private ProjectBrainWindow? _projectBrainWindow;
+    private RagWindow? _ragWindow;
+    private string _projectBrainStatus = "no_folder";
+    private string? _projectBrainLastError;
+    private bool _isExiting;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
         if (e.Args.Length >= 2 && e.Args[0].Equals("--process-pet", StringComparison.OrdinalIgnoreCase))
         {
@@ -38,26 +43,37 @@ public partial class App : Application
 
         _settingsRepository = new SettingsRepository();
         _settings = _settingsRepository.Load();
+        EnsureDefaultPetAppearance(_settings, _settingsRepository);
+        _projectBrainStatus = string.IsNullOrWhiteSpace(_settings.ProjectRoot) ? "no_folder" : "folder_selected";
         _runtimeStatus = new RuntimeStatusStore();
         _aiRewriteService = new CompositeAiRewriteService();
         _tokenUsage = new TokenUsageStore();
         _projectBrain = new ProjectBrainService(SettingsRepository.DataDirectory, BuildBrainOptions(_settings));
+        if (!string.IsNullOrWhiteSpace(_settings.ProjectRoot) && _projectBrain.IsIndexed(_settings.ProjectRoot))
+        {
+            var metadata = _projectBrain.LoadIndexMetadata(_settings.ProjectRoot);
+            _projectBrainStatus = StatusText(metadata?.Status ?? ProjectBrainStatus.Ready);
+            _projectBrainLastError = metadata?.LastError;
+        }
 
         _notifyIcon = BuildTrayIcon();
         _notifyIcon.Visible = true;
 
         RegisterHotKeys();
         ShowAiPetIfEnabled();
+        OpenDashboard();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _isExiting = true;
         _hotKeyManager?.Dispose();
         _aiRewriteService?.Dispose();
         _projectBrain?.Dispose();
         _aiPetWindow?.Close();
         _dashboardWindow?.Close();
         _projectBrainWindow?.Close();
+        _ragWindow?.Close();
 
         if (_notifyIcon is not null)
         {
@@ -72,10 +88,11 @@ public partial class App : Application
     private NotifyIcon BuildTrayIcon()
     {
         var menu = new ContextMenuStrip();
-        var status = new ToolStripMenuItem("AI Prompt Pet: running") { Enabled = false };
+        var status = new ToolStripMenuItem("Woody: running") { Enabled = false };
+        var openStudio = new ToolStripMenuItem("Open Woody Studio");
         var toggleAiPet = new ToolStripMenuItem();
         var setPetImage = new ToolStripMenuItem("Set pet image...");
-        var dashboard = new ToolStripMenuItem("Token dashboard...");
+        var dashboard = new ToolStripMenuItem("Dashboard...");
         var selectProject = new ToolStripMenuItem("Select project folder...");
         var reindexProject = new ToolStripMenuItem("Re-index project");
         var openBrain = new ToolStripMenuItem("Open Project Brain...");
@@ -108,6 +125,7 @@ public partial class App : Application
             RefreshToggle();
         };
 
+        openStudio.Click += (_, _) => OpenDashboard();
         setPetImage.Click += (_, _) => SetPetImage();
         dashboard.Click += (_, _) => OpenDashboard();
         selectProject.Click += (_, _) => SelectProjectFolder();
@@ -127,9 +145,11 @@ public partial class App : Application
         RefreshToggle();
         menu.Items.Add(status);
         menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(openStudio);
+        menu.Items.Add(dashboard);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(toggleAiPet);
         menu.Items.Add(setPetImage);
-        menu.Items.Add(dashboard);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(selectProject);
         menu.Items.Add(reindexProject);
@@ -145,6 +165,13 @@ public partial class App : Application
             ContextMenuStrip = menu
         };
 
+        notifyIcon.MouseClick += (_, args) =>
+        {
+            if (args.Button == MouseButtons.Left)
+            {
+                OpenDashboard();
+            }
+        };
         notifyIcon.DoubleClick += (_, _) => OpenDashboard();
         return notifyIcon;
     }
@@ -170,11 +197,71 @@ public partial class App : Application
 
         if (_aiPetWindow is null)
         {
-            _aiPetWindow = new AiPetWindow(_settings, _settingsRepository, RunInlineRewrite, OpenDashboard, SetPetImage);
+            _aiPetWindow = new AiPetWindow(
+                _settings,
+                _settingsRepository,
+                RunInlineRewrite,
+                OpenDashboard,
+                SelectProjectFolder,
+                ReindexCurrentProjectAsync,
+                ShowQdrantStatus,
+                OpenRag,
+                () => _settings?.ProjectRoot,
+                ProjectStatusText,
+                SetPetImage);
             _aiPetWindow.Closed += (_, _) => _aiPetWindow = null;
         }
 
         _aiPetWindow.Show();
+    }
+
+    private static void EnsureDefaultPetAppearance(CorrectionSettings settings, SettingsRepository repository)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.AiPetImagePath) ||
+            settings.AiPetFrames.Any(File.Exists))
+        {
+            return;
+        }
+
+        var defaultGif = FindBundledDefaultPetGif();
+        if (defaultGif is null)
+        {
+            return;
+        }
+
+        try
+        {
+            settings.AiPetFrames = PetImageProcessor.ProcessGifToFrames(defaultGif, out var interval);
+            settings.AiPetFrameIntervalMs = interval;
+            settings.AiPetImagePath = null;
+            settings.AiPetEnabled = true;
+            if (string.IsNullOrWhiteSpace(settings.AiPetName) ||
+                settings.AiPetName.Equals("Pet", StringComparison.OrdinalIgnoreCase) ||
+                settings.AiPetName.Equals("Beaver", StringComparison.OrdinalIgnoreCase))
+            {
+                settings.AiPetName = "Woody";
+            }
+
+            repository.Save(settings);
+        }
+        catch
+        {
+            // If the bundled GIF cannot be processed, keep the built-in robot as a last-resort fallback.
+        }
+    }
+
+    private static string? FindBundledDefaultPetGif()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "1780836848157.gif"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "1780836848157.gif"),
+            Path.Combine(Environment.CurrentDirectory, "1780836848157.gif"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "1780836848157.gif")),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "1780836848157.gif"))
+        };
+
+        return candidates.FirstOrDefault(File.Exists);
     }
 
     // Headless mode: strips white backgrounds from a single image or a folder of frames, then saves to settings.
@@ -262,20 +349,82 @@ public partial class App : Application
 
     private void OpenDashboard()
     {
-        if (_tokenUsage is null)
+        if (_tokenUsage is null || _settings is null || _projectBrain is null)
         {
             return;
         }
 
-        if (_dashboardWindow is null)
-        {
-            _dashboardWindow = new DashboardWindow(_tokenUsage);
-            _dashboardWindow.Closed += (_, _) => _dashboardWindow = null;
+            if (_dashboardWindow is null)
+            {
+                _dashboardWindow = new DashboardWindow(
+                _tokenUsage,
+                _settings,
+                _projectBrain,
+                () => _projectBrainStatus,
+                () => _projectBrainLastError,
+                SelectProjectFolder,
+                ReindexCurrentProjectAsync,
+                OpenRag,
+                ShowQdrantStatus,
+                () => OpenProjectBrain(),
+                SetPetImage);
+            _dashboardWindow.Closing += (_, args) =>
+            {
+                if (_isExiting)
+                {
+                    return;
+                }
+
+                args.Cancel = true;
+                _dashboardWindow.Hide();
+            };
         }
 
         _dashboardWindow.Show();
+        if (_dashboardWindow.WindowState == WindowState.Minimized)
+        {
+            _dashboardWindow.WindowState = WindowState.Normal;
+        }
+
         _dashboardWindow.Activate();
         _dashboardWindow.Refresh();
+    }
+
+    private void OpenRag()
+    {
+        if (_settings is null || _projectBrain is null)
+        {
+            return;
+        }
+
+        _ragWindow?.Close();
+        _ragWindow = new RagWindow(_settings, _projectBrain, ReindexCurrentProjectAsync, () => _projectBrainStatus, () => _projectBrainLastError);
+        _ragWindow.Closed += (_, _) => _ragWindow = null;
+        _ragWindow.Show();
+        _ragWindow.Activate();
+    }
+
+    private string ProjectStatusText()
+    {
+        if (_settings is null || string.IsNullOrWhiteSpace(_settings.ProjectRoot))
+        {
+            return "Choose a folder to build Woody's local project brain.";
+        }
+
+        var status = _projectBrainStatus switch
+        {
+            "indexing" => "Indexing project brain...",
+            "semantic_indexing" => "Creating FastEmbed vectors and saving to Qdrant...",
+            "ready" => "RAG ready. Woody will compile prompts with project context.",
+            "partial_ready" => "Partial RAG ready. Some chunks failed, fallback still works.",
+            "qdrant_unavailable" => "Qdrant unavailable. Woody will use keyword fallback.",
+            "embedding_unavailable" => "FastEmbed unavailable. Woody will use keyword fallback.",
+            "error" => $"Index error: {_projectBrainLastError}",
+            "folder_selected" => "Folder selected. Indexing will start after choosing/re-indexing.",
+            _ => "Folder selected."
+        };
+
+        return status;
     }
 
     private async void RunInlineRewrite(AiRewriteAction action, nint targetWindow)
@@ -364,6 +513,15 @@ public partial class App : Application
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(_settings.ProjectRoot))
+        {
+            Notify("No project folder selected. Prompt optimized without project context.");
+        }
+        else if (_projectBrainStatus != "ready")
+        {
+            Notify("Project brain is not ready yet. Prompt optimized with available context.");
+        }
+
         _aiPetWindow?.SetThinking(true);
         EnhancementOutcome outcome;
         try
@@ -415,6 +573,8 @@ public partial class App : Application
         }
 
         _settings.ProjectRoot = dialog.SelectedPath;
+        _projectBrainStatus = "folder_selected";
+        _projectBrainLastError = null;
         _settingsRepository.Save(_settings);
         await ReindexCurrentProjectAsync();
     }
@@ -424,25 +584,54 @@ public partial class App : Application
     {
         if (_projectBrain is null || _settings is null || string.IsNullOrWhiteSpace(_settings.ProjectRoot))
         {
+            _projectBrainStatus = "no_folder";
             Notify("Select a project folder first.");
             return;
         }
 
         _aiPetWindow?.SetThinking(true);
+        _projectBrainStatus = "indexing";
+        _projectBrainLastError = null;
+        _dashboardWindow?.Refresh();
+        _ragWindow?.Refresh();
         try
         {
             var brain = await _projectBrain.IndexAsync(_settings.ProjectRoot, CancellationToken.None);
+            var metadata = _projectBrain.LoadIndexMetadata(_settings.ProjectRoot);
+            _projectBrainStatus = StatusText(metadata?.Status ?? ProjectBrainStatus.Ready);
+            _projectBrainLastError = metadata?.LastError;
             Notify($"Indexed {brain.Files.Count} files in {brain.ProjectName}.");
         }
         catch (Exception ex)
         {
+            _projectBrainStatus = "error";
+            _projectBrainLastError = ex.Message;
             _runtimeStatus?.RecordError(ex);
             Notify("Indexing failed.");
         }
         finally
         {
             _aiPetWindow?.SetThinking(false);
+            _dashboardWindow?.Refresh();
+            _ragWindow?.Refresh();
         }
+    }
+
+    private async Task ShowQdrantStatus()
+    {
+        if (_projectBrain is null || _settings is null)
+        {
+            return;
+        }
+
+        var stats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
+        if (!stats.IsAvailable)
+        {
+            Notify($"Qdrant unavailable: {stats.Error}. Start Qdrant on {_settings.QdrantUrl}.");
+            return;
+        }
+
+        Notify($"Qdrant OK: {stats.CollectionName}, {stats.VectorCount:N0} vectors, dim {stats.VectorDimension}.");
     }
 
     private void OpenProjectBrain(IEnumerable<string>? highlight = null)
@@ -471,14 +660,35 @@ public partial class App : Application
         return new ProjectBrainOptions
         {
             Ollama = new OllamaSettings(settings.AiEndpoint, settings.AiModel, settings.EmbeddingModel),
+            QdrantUrl = settings.QdrantUrl,
+            VectorDbProvider = settings.VectorDbProvider,
+            EmbeddingProvider = settings.EmbeddingProvider,
+            EmbeddingModel = settings.EmbeddingModel,
+            FastEmbedSidecarUrl = settings.FastEmbedSidecarUrl,
+            PythonExecutable = settings.PythonExecutable,
+            EmbeddingBatchSize = settings.EmbeddingBatchSize,
+            RetrievalTopK = settings.RetrievalTopK,
             Index = new IndexOptions
             {
                 MaxFileSizeBytes = settings.MaxIndexedFileSizeKb * 1024,
                 MaxFiles = settings.MaxIndexedFiles,
+                MaxInitialChunks = settings.MaxInitialChunks,
                 IgnoredFolders = settings.IgnoredProjectFolders.ToHashSet(StringComparer.OrdinalIgnoreCase)
             }
         };
     }
+
+    private static string StatusText(ProjectBrainStatus status) => status switch
+    {
+        ProjectBrainStatus.Ready => "ready",
+        ProjectBrainStatus.PartialReady => "partial_ready",
+        ProjectBrainStatus.QdrantUnavailable => "qdrant_unavailable",
+        ProjectBrainStatus.EmbeddingUnavailable => "embedding_unavailable",
+        ProjectBrainStatus.SemanticIndexing => "semantic_indexing",
+        ProjectBrainStatus.QuickIndexing => "indexing",
+        ProjectBrainStatus.Error => "error",
+        _ => status.ToString().ToLowerInvariant()
+    };
 
     private string RewriteUnavailableMessage()
     {
