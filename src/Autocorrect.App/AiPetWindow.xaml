@@ -202,7 +202,7 @@
                         <Button Style="{StaticResource SecondaryAction}" Content="View RAG" Click="ViewRag_OnClick" Margin="4,0,0,8" />
                         <Button Style="{StaticResource SecondaryAction}" Content="View Dashboard" Click="Dashboard_OnClick" Margin="0,0,4,8" />
                         <Button Style="{StaticResource SecondaryAction}" Content="Reindex Project" Click="Reindex_OnClick" Margin="4,0,0,8" />
-                        <Button Style="{StaticResource SecondaryAction}" Content="Qdrant Status" Click="QdrantStatus_OnClick" Margin="0,0,4,0" />
+                        <Button Style="{StaticResource SecondaryAction}" Content="Vector DB Status" Click="VectorStoreStatus_OnClick" Margin="0,0,4,0" />
                         <Button Style="{StaticResource SecondaryAction}" Content="Set pet image" Click="SetImage_OnClick" Margin="4,0,0,0" />
                     </UniformGrid>
                 </StackPanel>

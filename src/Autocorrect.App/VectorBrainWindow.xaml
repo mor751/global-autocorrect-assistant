@@ -1,0 +1,119 @@
+<Window x:Class="Autocorrect.App.VectorBrainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Woody Vector Brain"
+        Width="1180"
+        Height="800"
+        MinWidth="900"
+        MinHeight="600"
+        WindowStartupLocation="CenterScreen"
+        Background="#05080C"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <SolidColorBrush x:Key="Ink" Color="#E6EDF3" />
+        <SolidColorBrush x:Key="Muted" Color="#7C8B9A" />
+        <SolidColorBrush x:Key="Panel" Color="#0B1118" />
+        <SolidColorBrush x:Key="Line" Color="#172432" />
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Ink}" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="96" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="14,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="#E5F9FF" />
+            <Setter Property="Background" Value="#0E2630" />
+            <Setter Property="BorderBrush" Value="#22D3EE" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="Vector Brain Map" FontSize="22" FontWeight="Bold" />
+                <TextBlock x:Name="SubtitleText" Text="Every embedding in the local vector DB, projected to 2D and linked to its nearest neighbors."
+                           Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="Reload" Click="Reload_OnClick" />
+                <Button Content="Reset view" Click="ResetView_OnClick" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="300" />
+            </Grid.ColumnDefinitions>
+
+            <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" ClipToBounds="True">
+                <Grid>
+                    <Canvas x:Name="MapCanvas" Background="Transparent"
+                            MouseWheel="MapCanvas_OnMouseWheel"
+                            MouseLeftButtonDown="MapCanvas_OnMouseLeftButtonDown"
+                            MouseLeftButtonUp="MapCanvas_OnMouseLeftButtonUp"
+                            MouseMove="MapCanvas_OnMouseMove">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="MapScale" ScaleX="1" ScaleY="1" />
+                                <TranslateTransform x:Name="MapTranslate" X="0" Y="0" />
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+                    </Canvas>
+                    <TextBlock x:Name="LoadingText" Text="Loading vectors..." Foreground="{StaticResource Muted}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <TextBlock Text="Scroll = zoom · drag = pan · click a node for details"
+                               Foreground="{StaticResource Muted}" FontSize="11"
+                               HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="12" />
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1" Margin="12,0,0,0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12">
+                <Grid Margin="14">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Grid.Row="0">
+                        <TextBlock Text="SELECTED NODE" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="SemiBold" />
+                        <TextBlock x:Name="SelectedFileText" Text="Click a node to inspect" Margin="0,6,0,0" FontWeight="SemiBold" />
+                        <TextBlock x:Name="SelectedMetaText" Text="" Foreground="{StaticResource Muted}" Margin="0,4,0,0" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="1" Margin="0,16,0,0">
+                        <TextBlock Text="STATS" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="SemiBold" />
+                        <TextBlock x:Name="StatsText" Text="" Margin="0,6,0,0" Foreground="{StaticResource Muted}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="2" Margin="0,16,0,0">
+                        <TextBlock Text="TOP FOLDERS" Foreground="{StaticResource Muted}" FontSize="11" FontWeight="SemiBold" />
+                        <ItemsControl x:Name="LegendItems" Margin="0,8,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Border Width="12" Height="12" CornerRadius="3" Background="{Binding Color}" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Label}" Margin="8,0,0,0" VerticalAlignment="Center" FontSize="12" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

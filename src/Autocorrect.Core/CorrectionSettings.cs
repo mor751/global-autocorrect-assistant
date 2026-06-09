@@ -62,21 +62,7 @@ public sealed class CorrectionSettings
 
     public string? ProjectRoot { get; set; }
 
-    public string VectorDbProvider { get; set; } = "QdrantLocal";
-
-    public string QdrantUrl { get; set; } = "http://localhost:6333";
-
-    public string EmbeddingProvider { get; set; } = "FastEmbed";
-
-    public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
-
     public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
-
-    public string FastEmbedSidecarUrl { get; set; } = "http://127.0.0.1:8765";
-
-    public string PythonExecutable { get; set; } = "python";
-
-    public int EmbeddingBatchSize { get; set; } = 32;
 
     public int RetrievalTopK { get; set; } = 12;
 

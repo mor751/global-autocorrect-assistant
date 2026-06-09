@@ -145,36 +145,10 @@ public sealed class SettingsRepository
             : settings.IgnoredProjectFolders.ToHashSet(StringComparer.OrdinalIgnoreCase);
         settings.MaxIndexedFileSizeKb = Math.Clamp(settings.MaxIndexedFileSizeKb, 16, 2048);
         settings.MaxIndexedFiles = Math.Clamp(settings.MaxIndexedFiles, 50, 20000);
-        settings.EmbeddingModel = Autocorrect.Core.Brain.FastEmbedModelCatalog.Coerce(settings.EmbeddingModel);
 
         if (string.IsNullOrWhiteSpace(settings.OllamaEmbeddingModel))
         {
             settings.OllamaEmbeddingModel = "nomic-embed-text";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.VectorDbProvider))
-        {
-            settings.VectorDbProvider = "QdrantLocal";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.QdrantUrl))
-        {
-            settings.QdrantUrl = "http://localhost:6333";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.EmbeddingProvider))
-        {
-            settings.EmbeddingProvider = "FastEmbed";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.FastEmbedSidecarUrl))
-        {
-            settings.FastEmbedSidecarUrl = "http://127.0.0.1:8765";
-        }
-
-        if (string.IsNullOrWhiteSpace(settings.PythonExecutable))
-        {
-            settings.PythonExecutable = "python";
         }
 
         if (string.IsNullOrWhiteSpace(settings.WriterModel))
@@ -187,7 +161,6 @@ public sealed class SettingsRepository
             settings.AiModel = settings.WriterModel;
         }
 
-        settings.EmbeddingBatchSize = Math.Clamp(settings.EmbeddingBatchSize, 1, 128);
         settings.RetrievalTopK = Math.Clamp(settings.RetrievalTopK, 3, 40);
         settings.MaxInitialIndexSeconds = Math.Clamp(settings.MaxInitialIndexSeconds, 30, 900);
         settings.MaxInitialChunks = Math.Clamp(settings.MaxInitialChunks, 100, 100000);

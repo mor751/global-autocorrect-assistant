@@ -21,7 +21,7 @@ public sealed class ProjectSourceFile
 
 public interface IProjectScanner
 {
-    IReadOnlyList<ProjectSourceFile> Scan(string projectRoot, IndexOptions options, out int skippedFiles);
+    IReadOnlyList<ProjectSourceFile> Scan(string projectRoot, IndexOptions options, out IReadOnlyList<SkippedFile> skipped);
 }
 
 public interface IProjectAnalyzer
@@ -36,54 +36,52 @@ public interface IProjectChunker
 
 public sealed class ProjectScanner : IProjectScanner
 {
-    private static readonly HashSet<string> UsefulExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte",
-        ".cs", ".py", ".go", ".rb", ".rs", ".java",
-        ".css", ".scss", ".sass", ".less",
-        ".json", ".md", ".mdx", ".txt", ".yaml", ".yml", ".html", ".prisma", ".sql", ".csproj", ".sln"
-    };
-
-    private static readonly HashSet<string> UsefulRootNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Dockerfile", "package.json", "readme.md", "tsconfig.json", "vite.config.js", "vite.config.ts",
-        "next.config.js", "next.config.mjs", "next.config.ts", "tailwind.config.js", "tailwind.config.ts",
-        "pyproject.toml", "requirements.txt", "components.json", ".cursorrules", "agents.md", "claude.md"
-    };
-
+    // Binary or private file types that can never become useful text context.
     private static readonly HashSet<string> BinaryOrPrivateExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".mp4", ".mov", ".avi", ".mkv",
-        ".mp3", ".wav", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".zip", ".rar", ".7z",
-        ".exe", ".dll", ".pdb", ".bin", ".dat", ".pem", ".key", ".pfx", ".crt", ".cer"
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".icns", ".mp4", ".mov", ".avi", ".mkv",
+        ".mp3", ".wav", ".flac", ".ogg", ".woff", ".woff2", ".ttf", ".otf", ".eot", ".pdf", ".zip", ".rar",
+        ".7z", ".gz", ".tar", ".exe", ".dll", ".pdb", ".so", ".dylib", ".bin", ".dat", ".class", ".o",
+        ".pem", ".key", ".pfx", ".crt", ".cer", ".p12", ".keystore"
     };
 
-    public IReadOnlyList<ProjectSourceFile> Scan(string projectRoot, IndexOptions options, out int skippedFiles)
+    // Text files that are noise for prompt context (lock files, source maps, logs, data dumps).
+    private static readonly HashSet<string> NoiseExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        skippedFiles = 0;
+        ".map", ".lock", ".log", ".tmp", ".temp", ".bak", ".swp", ".snap", ".tsbuildinfo",
+        ".svg", ".csv", ".tsv", ".min"
+    };
+
+    private static readonly HashSet<string> NoiseFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "npm-shrinkwrap.json",
+        "composer.lock", "poetry.lock", "cargo.lock", "gemfile.lock", ".ds_store", "thumbs.db"
+    };
+
+    // Denylist scan: take every text file in the folder except secrets, binaries, noise, oversized, or ignored folders.
+    public IReadOnlyList<ProjectSourceFile> Scan(string projectRoot, IndexOptions options, out IReadOnlyList<SkippedFile> skipped)
+    {
         var root = Path.GetFullPath(projectRoot);
         var projectId = BrainStorage.ProjectKey(root);
         var files = new List<ProjectSourceFile>();
+        var skippedFiles = new List<SkippedFile>();
 
         foreach (var path in EnumerateCandidateFiles(root, options))
         {
+            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
+            var fileName = Path.GetFileName(path);
+            var extension = Path.GetExtension(path);
+
             if (files.Count >= options.MaxFiles)
             {
-                skippedFiles++;
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = $"file limit reached ({options.MaxFiles})" });
                 continue;
             }
 
-            var fileName = Path.GetFileName(path);
-            var extension = Path.GetExtension(path);
-            var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
-            var isRootUseful = !relative.Contains('/') && UsefulRootNames.Contains(fileName);
-
-            if (SecretScanner.LooksLikeSecretFile(fileName) ||
-                BinaryOrPrivateExtensions.Contains(extension) ||
-                LooksGeneratedOrMinified(fileName) ||
-                (!isRootUseful && !UsefulExtensions.Contains(extension)))
+            var staticReason = StaticSkipReason(fileName, extension);
+            if (staticReason is not null)
             {
-                skippedFiles++;
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = staticReason });
                 continue;
             }
 
@@ -91,15 +89,22 @@ public sealed class ProjectScanner : IProjectScanner
             try
             {
                 info = new FileInfo(path);
-                if (info.Length == 0 || info.Length > options.MaxFileSizeBytes)
-                {
-                    skippedFiles++;
-                    continue;
-                }
             }
-            catch
+            catch (Exception ex)
             {
-                skippedFiles++;
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = $"read error: {ex.GetType().Name}" });
+                continue;
+            }
+
+            if (info.Length == 0)
+            {
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = "empty file" });
+                continue;
+            }
+
+            if (info.Length > options.MaxFileSizeBytes)
+            {
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = $"too large ({info.Length / 1024} KB > {options.MaxFileSizeBytes / 1024} KB)" });
                 continue;
             }
 
@@ -109,15 +114,15 @@ public sealed class ProjectScanner : IProjectScanner
                 var bytes = File.ReadAllBytes(path);
                 if (LooksBinary(bytes))
                 {
-                    skippedFiles++;
+                    skippedFiles.Add(new SkippedFile { Path = relative, Reason = "binary content" });
                     continue;
                 }
 
                 content = SecretScanner.Redact(Encoding.UTF8.GetString(bytes));
             }
-            catch
+            catch (Exception ex)
             {
-                skippedFiles++;
+                skippedFiles.Add(new SkippedFile { Path = relative, Reason = $"read error: {ex.GetType().Name}" });
                 continue;
             }
 
@@ -135,7 +140,18 @@ public sealed class ProjectScanner : IProjectScanner
             });
         }
 
+        skipped = skippedFiles;
         return Prioritize(files);
+    }
+
+    private static string? StaticSkipReason(string fileName, string extension)
+    {
+        if (SecretScanner.LooksLikeSecretFile(fileName)) return "secret/private file";
+        if (BinaryOrPrivateExtensions.Contains(extension)) return $"binary type ({extension})";
+        if (NoiseFileNames.Contains(fileName)) return "lock/metadata file";
+        if (NoiseExtensions.Contains(extension)) return $"noise type ({extension})";
+        if (LooksGeneratedOrMinified(fileName)) return "generated or minified";
+        return null;
     }
 
     private static IEnumerable<string> EnumerateCandidateFiles(string root, IndexOptions options)
@@ -279,14 +295,18 @@ public sealed class ProjectAnalyzer : IProjectAnalyzer
     {
         ".ts" or ".tsx" => "typescript",
         ".js" or ".jsx" or ".mjs" or ".cjs" => "javascript",
-        ".cs" or ".csproj" or ".sln" => "csharp",
+        ".cs" => "csharp",
+        ".csproj" or ".sln" or ".props" or ".targets" or ".resx" or ".config" or ".xaml" => "xml",
         ".py" => "python",
         ".json" => "json",
         ".md" or ".mdx" => "markdown",
         ".css" or ".scss" or ".sass" or ".less" => "css",
         ".sql" => "sql",
         ".yaml" or ".yml" => "yaml",
-        ".html" => "html",
+        ".toml" => "toml",
+        ".html" or ".htm" => "html",
+        ".ps1" or ".psm1" or ".psd1" => "powershell",
+        ".editorconfig" or ".ini" => "ini",
         _ when Path.GetFileName(path).Equals("Dockerfile", StringComparison.OrdinalIgnoreCase) => "dockerfile",
         _ => "text"
     };

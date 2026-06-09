@@ -32,7 +32,7 @@ public sealed class RagRetrievalService
         }
 
         var cleaned = CleanQuery(query);
-        var collection = _metadata?.QdrantCollection ?? BrainStorage.CollectionName(projectRoot);
+        var collection = _metadata?.Collection ?? BrainStorage.CollectionName(projectRoot);
         if (_metadata?.Status is ProjectBrainStatus.Ready or ProjectBrainStatus.PartialReady)
         {
             var queryVector = await _embeddings.EmbedTextAsync($"query: {cleaned}", cancellationToken);
@@ -45,7 +45,7 @@ public sealed class RagRetrievalService
                     return new RetrievalResponse
                     {
                         Query = cleaned,
-                        RetrievalMode = RetrievalMode.HybridQdrantKeyword,
+                        RetrievalMode = RetrievalMode.HybridVectorKeyword,
                         Results = boosted
                     };
                 }

@@ -31,6 +31,9 @@ public static class BrainStorage
     public static string ProjectIndexPath(string baseDirectory, string projectRoot) =>
         Path.Combine(ProjectDirectory(baseDirectory, projectRoot), "project-index.json");
 
+    public static string SkippedReportPath(string baseDirectory, string projectRoot) =>
+        Path.Combine(ProjectDirectory(baseDirectory, projectRoot), "skipped-files.json");
+
     public static string CollectionName(string projectRoot) =>
         $"woody_project_{ProjectKey(projectRoot).ToLowerInvariant()}";
 }

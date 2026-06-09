@@ -6,7 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>GlobalAutocorrect</AssemblyName>
     <RootNamespace>Autocorrect.App</RootNamespace>
-    <ApplicationIcon />
+    <ApplicationIcon>logo.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

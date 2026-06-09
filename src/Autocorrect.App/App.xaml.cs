@@ -204,7 +204,7 @@ public partial class App : Application
                 OpenDashboard,
                 SelectProjectFolder,
                 ReindexCurrentProjectAsync,
-                ShowQdrantStatus,
+                ShowVectorStoreStatus,
                 OpenRag,
                 () => _settings?.ProjectRoot,
                 ProjectStatusText,
@@ -365,9 +365,10 @@ public partial class App : Application
                 SelectProjectFolder,
                 ReindexCurrentProjectAsync,
                 OpenRag,
-                ShowQdrantStatus,
+                ShowVectorStoreStatus,
                 () => OpenProjectBrain(),
-                SetPetImage);
+                SetPetImage,
+                ReapplyBrainSettings);
             _dashboardWindow.Closing += (_, args) =>
             {
                 if (_isExiting)
@@ -414,11 +415,11 @@ public partial class App : Application
         var status = _projectBrainStatus switch
         {
             "indexing" => "Indexing project brain...",
-            "semantic_indexing" => "Creating FastEmbed vectors and saving to Qdrant...",
+            "semantic_indexing" => "Creating local ONNX embeddings and saving to the SQLite vector DB...",
             "ready" => "RAG ready. Woody will compile prompts with project context.",
             "partial_ready" => "Partial RAG ready. Some chunks failed, fallback still works.",
-            "qdrant_unavailable" => "Qdrant unavailable. Woody will use keyword fallback.",
-            "embedding_unavailable" => "FastEmbed unavailable. Woody will use keyword fallback.",
+            "vector_store_unavailable" => "Local vector store unavailable. Woody will use keyword fallback.",
+            "embedding_unavailable" => "Local embedder unavailable. Woody will use keyword fallback.",
             "error" => $"Index error: {_projectBrainLastError}",
             "folder_selected" => "Folder selected. Indexing will start after choosing/re-indexing.",
             _ => "Folder selected."
@@ -617,7 +618,7 @@ public partial class App : Application
         }
     }
 
-    private async Task ShowQdrantStatus()
+    private async Task ShowVectorStoreStatus()
     {
         if (_projectBrain is null || _settings is null)
         {
@@ -627,11 +628,11 @@ public partial class App : Application
         var stats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
         if (!stats.IsAvailable)
         {
-            Notify($"Qdrant unavailable at {_settings.QdrantUrl}: {stats.Error}. Start it: {QdrantVectorStore.StartCommand}");
+            Notify($"Local vector store unavailable: {stats.Error}");
             return;
         }
 
-        Notify($"Qdrant OK: {stats.CollectionName}, {stats.VectorCount:N0} vectors, dim {stats.VectorDimension}.");
+        Notify($"SQLite vector DB OK: {stats.CollectionName}, {stats.VectorCount:N0} vectors, dim {stats.VectorDimension}.");
     }
 
     private void OpenProjectBrain(IEnumerable<string>? highlight = null)
@@ -655,18 +656,22 @@ public partial class App : Application
         _projectBrainWindow.Activate();
     }
 
+    // Pushes the current (live-edited) settings into the brain so a GUI refresh reflects new config without restart.
+    private void ReapplyBrainSettings()
+    {
+        if (_settings is null || _projectBrain is null)
+        {
+            return;
+        }
+
+        _projectBrain.Reconfigure(BuildBrainOptions(_settings));
+    }
+
     private static ProjectBrainOptions BuildBrainOptions(CorrectionSettings settings)
     {
         return new ProjectBrainOptions
         {
             Ollama = new OllamaSettings(settings.AiEndpoint, settings.AiModel, settings.OllamaEmbeddingModel),
-            QdrantUrl = settings.QdrantUrl,
-            VectorDbProvider = settings.VectorDbProvider,
-            EmbeddingProvider = settings.EmbeddingProvider,
-            EmbeddingModel = FastEmbedModelCatalog.Coerce(settings.EmbeddingModel),
-            FastEmbedSidecarUrl = settings.FastEmbedSidecarUrl,
-            PythonExecutable = settings.PythonExecutable,
-            EmbeddingBatchSize = settings.EmbeddingBatchSize,
             RetrievalTopK = settings.RetrievalTopK,
             Index = new IndexOptions
             {
@@ -682,7 +687,7 @@ public partial class App : Application
     {
         ProjectBrainStatus.Ready => "ready",
         ProjectBrainStatus.PartialReady => "partial_ready",
-        ProjectBrainStatus.QdrantUnavailable => "qdrant_unavailable",
+        ProjectBrainStatus.VectorStoreUnavailable => "vector_store_unavailable",
         ProjectBrainStatus.EmbeddingUnavailable => "embedding_unavailable",
         ProjectBrainStatus.SemanticIndexing => "semantic_indexing",
         ProjectBrainStatus.QuickIndexing => "indexing",

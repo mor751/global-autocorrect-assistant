@@ -20,7 +20,7 @@ public partial class AiPetWindow : Window
     private readonly Action _openDashboard;
     private readonly Action _chooseFolder;
     private readonly Func<Task> _reindexProject;
-    private readonly Func<Task> _showQdrantStatus;
+    private readonly Func<Task> _showVectorStoreStatus;
     private readonly Action _openRag;
     private readonly Action _setPetImage;
     private readonly Func<string?> _projectFolderProvider;
@@ -40,7 +40,7 @@ public partial class AiPetWindow : Window
         Action openDashboard,
         Action chooseFolder,
         Func<Task> reindexProject,
-        Func<Task> showQdrantStatus,
+        Func<Task> showVectorStoreStatus,
         Action openRag,
         Func<string?> projectFolderProvider,
         Func<string> projectStatusProvider,
@@ -53,7 +53,7 @@ public partial class AiPetWindow : Window
         _openDashboard = openDashboard;
         _chooseFolder = chooseFolder;
         _reindexProject = reindexProject;
-        _showQdrantStatus = showQdrantStatus;
+        _showVectorStoreStatus = showVectorStoreStatus;
         _openRag = openRag;
         _projectFolderProvider = projectFolderProvider;
         _projectStatusProvider = projectStatusProvider;
@@ -265,10 +265,10 @@ public partial class AiPetWindow : Window
         await _reindexProject();
     }
 
-    private async void QdrantStatus_OnClick(object sender, RoutedEventArgs e)
+    private async void VectorStoreStatus_OnClick(object sender, RoutedEventArgs e)
     {
         ActionsPopup.IsOpen = false;
-        await _showQdrantStatus();
+        await _showVectorStoreStatus();
     }
 
     private void SetImage_OnClick(object sender, RoutedEventArgs e)

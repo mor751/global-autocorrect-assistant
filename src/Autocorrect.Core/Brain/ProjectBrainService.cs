@@ -28,22 +28,17 @@ public sealed class ProjectBrainOptions
     public OllamaSettings Ollama { get; set; } = OllamaSettings.Default;
     public IndexOptions Index { get; set; } = new();
     public int RetrievalTopK { get; set; } = 12;
-    public string QdrantUrl { get; set; } = "http://localhost:6333";
-    public string VectorDbProvider { get; set; } = "QdrantLocal";
-    public string EmbeddingProvider { get; set; } = "FastEmbed";
-    public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
-    public string FastEmbedSidecarUrl { get; set; } = "http://127.0.0.1:8765";
-    public string PythonExecutable { get; set; } = "python";
-    public int EmbeddingBatchSize { get; set; } = 32;
 }
 
 // Orchestrates indexing, retrieval, analysis, rewriting, and history into one project-aware enhancement flow.
 public sealed class ProjectBrainService : IDisposable
 {
+    private const int EmbeddingBatchSize = 16;
+
     private readonly string _baseDirectory;
-    private readonly ProjectBrainOptions _options;
+    private ProjectBrainOptions _options;
     private readonly IProjectIndexer _indexer;
-    private readonly OllamaClient _ollama;
+    private OllamaClient _ollama;
     private readonly PromptHistoryStore _history;
     private readonly PromptAnalyzer _analyzer = new();
 
@@ -54,6 +49,21 @@ public sealed class ProjectBrainService : IDisposable
         _indexer = new ProjectIndexer();
         _ollama = new OllamaClient(options.Ollama);
         _history = new PromptHistoryStore(BrainStorage.BrainDirectory(baseDirectory));
+    }
+
+    // Re-applies current settings (Ollama endpoint, retrieval depth, index limits) so a GUI refresh truly reruns everything.
+    public void Reconfigure(ProjectBrainOptions options)
+    {
+        var ollamaChanged = !_options.Ollama.Equals(options.Ollama);
+        _options = options;
+        if (!ollamaChanged)
+        {
+            return;
+        }
+
+        var old = _ollama;
+        _ollama = new OllamaClient(options.Ollama);
+        old.Dispose();
     }
 
     public bool IsIndexed(string? projectRoot) =>
@@ -69,6 +79,7 @@ public sealed class ProjectBrainService : IDisposable
         }, cancellationToken);
         var brain = snapshot.Brain;
         SaveBrain(brain);
+        SaveSkippedReport(projectRoot, snapshot.SkippedDetails);
 
         var fallbackStore = CreateFallbackStore(projectRoot);
         await fallbackStore.ClearProjectAsync(projectRoot, cancellationToken);
@@ -80,25 +91,25 @@ public sealed class ProjectBrainService : IDisposable
         metadata.QuickBrainStatus = ProjectBrainStatus.Ready;
         SaveIndexMetadata(metadata);
 
-        using var embeddings = CreateFastEmbedService();
-        using var qdrant = new QdrantVectorStore(_options.QdrantUrl);
+        using var embeddings = CreateEmbeddingService();
+        using var store = CreateVectorStore();
 
         if (!await embeddings.IsAvailableAsync(cancellationToken))
         {
             metadata.Status = ProjectBrainStatus.EmbeddingUnavailable;
             metadata.SemanticBrainStatus = ProjectBrainStatus.EmbeddingUnavailable;
-            metadata.LastError = "FastEmbed unavailable. Install Python and run: pip install fastembed";
+            metadata.LastError = "Local embedding model could not be loaded or downloaded. Check internet access for the first-time model download.";
             SaveIndexMetadata(metadata);
             return brain;
         }
 
         var dimension = embeddings.GetVectorDimension();
         metadata.VectorDimension = dimension;
-        if (!await qdrant.EnsureCollectionAsync(metadata.QdrantCollection, dimension, cancellationToken))
+        if (!await store.EnsureCollectionAsync(metadata.Collection, dimension, cancellationToken))
         {
-            metadata.Status = ProjectBrainStatus.QdrantUnavailable;
-            metadata.SemanticBrainStatus = ProjectBrainStatus.QdrantUnavailable;
-            metadata.LastError = $"Qdrant unavailable at {_options.QdrantUrl}";
+            metadata.Status = ProjectBrainStatus.VectorStoreUnavailable;
+            metadata.SemanticBrainStatus = ProjectBrainStatus.VectorStoreUnavailable;
+            metadata.LastError = "Local SQLite vector store could not be initialized.";
             SaveIndexMetadata(metadata);
             return brain;
         }
@@ -108,7 +119,7 @@ public sealed class ProjectBrainService : IDisposable
         var currentFiles = snapshot.Chunks.Select(chunk => chunk.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var deleted in previousFiles.Keys.Where(path => !currentFiles.Contains(path)).ToList())
         {
-            await qdrant.DeleteFileAsync(metadata.QdrantCollection, deleted, cancellationToken);
+            await store.DeleteFileAsync(metadata.Collection, deleted, cancellationToken);
         }
 
         var chunksToEmbed = snapshot.Chunks
@@ -119,7 +130,7 @@ public sealed class ProjectBrainService : IDisposable
                 !oldChunkHash.Equals(chunk.ChunkHash, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        foreach (var batch in chunksToEmbed.Chunk(Math.Clamp(_options.EmbeddingBatchSize, 1, 128)))
+        foreach (var batch in chunksToEmbed.Chunk(EmbeddingBatchSize))
         {
             var vectors = await embeddings.EmbedBatchAsync(batch.Select(chunk => $"passage: {chunk.EmbeddedText()}"), cancellationToken);
             if (vectors.Count != batch.Length)
@@ -128,7 +139,7 @@ public sealed class ProjectBrainService : IDisposable
                 continue;
             }
 
-            await qdrant.UpsertAsync(metadata.QdrantCollection, batch, vectors, cancellationToken);
+            await store.UpsertAsync(metadata.Collection, batch, vectors, cancellationToken);
             metadata.EmbeddedChunks += batch.Length;
             SaveIndexMetadata(metadata);
         }
@@ -180,7 +191,8 @@ public sealed class ProjectBrainService : IDisposable
             OriginalPrompt = originalPrompt,
             TargetAgent = PromptTargetAgent.Codex,
             Brain = brain,
-            Retrieval = retrieval
+            Retrieval = retrieval,
+            MissingContext = analysis.MissingContext
         }, ollamaAvailable, cancellationToken);
         var result = compiler.ToEnhancedPromptResult(compiled, originalPrompt);
 
@@ -248,10 +260,10 @@ public sealed class ProjectBrainService : IDisposable
         int? topK = null)
     {
         var metadata = LoadIndexMetadata(projectRoot);
-        using var embeddings = CreateFastEmbedService();
-        using var qdrant = new QdrantVectorStore(_options.QdrantUrl);
+        using var embeddings = CreateEmbeddingService();
+        using var store = CreateVectorStore();
         var fallback = CreateFallbackStore(projectRoot);
-        var retrieval = new RagRetrievalService(embeddings, qdrant, fallback, metadata);
+        var retrieval = new RagRetrievalService(embeddings, store, fallback, metadata);
         return await retrieval.RetrieveAsync(prompt, brain, projectRoot, topK ?? _options.RetrievalTopK, cancellationToken);
     }
 
@@ -329,22 +341,47 @@ public sealed class ProjectBrainService : IDisposable
         }
 
         var metadata = LoadIndexMetadata(projectRoot);
-        using var qdrant = new QdrantVectorStore(_options.QdrantUrl);
-        return await qdrant.GetStatsAsync(metadata?.QdrantCollection ?? BrainStorage.CollectionName(projectRoot), cancellationToken);
+        using var store = CreateVectorStore();
+        return await store.GetStatsAsync(ResolveCollection(projectRoot, metadata), cancellationToken);
     }
 
-    public async Task<FastEmbedDiagnostics> TestFastEmbedAsync(CancellationToken cancellationToken)
+    // Loads every stored vector + metadata for a project so the UI can visualize the embedding space.
+    public async Task<IReadOnlyList<VectorPoint>> ExportVectorsAsync(string? projectRoot, CancellationToken cancellationToken)
     {
-        using var embeddings = CreateFastEmbedService();
-        return await embeddings.RunDiagnosticsAsync(loadModel: true, testEmbedding: true, cancellationToken);
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return Array.Empty<VectorPoint>();
+        }
+
+        var metadata = LoadIndexMetadata(projectRoot);
+        using var store = CreateVectorStore();
+        return await store.ExportAsync(ResolveCollection(projectRoot, metadata), cancellationToken);
     }
 
-    private FastEmbedEmbeddingService CreateFastEmbedService() =>
-        new(
-            _options.EmbeddingModel,
-            _options.EmbeddingBatchSize,
-            _options.FastEmbedSidecarUrl,
-            _options.PythonExecutable);
+    private static string ResolveCollection(string projectRoot, ProjectIndexMetadata? metadata) =>
+        string.IsNullOrWhiteSpace(metadata?.Collection)
+            ? BrainStorage.CollectionName(projectRoot)
+            : metadata!.Collection;
+
+    public async Task<EmbeddingDiagnostics> TestEmbeddingAsync(CancellationToken cancellationToken)
+    {
+        using var local = new LocalOnnxEmbeddingService(_baseDirectory);
+        var available = await local.IsAvailableAsync(cancellationToken);
+        return new EmbeddingDiagnostics
+        {
+            Available = available,
+            ModelDownloaded = local.IsDownloaded,
+            ModelName = local.GetModelName(),
+            VectorDimension = local.GetVectorDimension(),
+            ModelPath = local.ModelPath,
+            LastHealthCheck = DateTimeOffset.UtcNow,
+            LastError = available ? string.Empty : local.LastError
+        };
+    }
+
+    private IEmbeddingService CreateEmbeddingService() => new LocalOnnxEmbeddingService(_baseDirectory);
+
+    private IProjectVectorStore CreateVectorStore() => new SqliteVectorStore(_baseDirectory);
 
     private ProjectIndexMetadata CreateMetadata(
         string projectRoot,
@@ -359,12 +396,11 @@ public sealed class ProjectBrainService : IDisposable
             ProjectRoot = Path.GetFullPath(projectRoot),
             ProjectName = brain.ProjectName,
             Framework = brain.Stack.Framework ?? "unknown",
-            EmbeddingProvider = _options.EmbeddingProvider,
-            EmbeddingModel = _options.EmbeddingModel,
-            VectorDbProvider = _options.VectorDbProvider,
-            QdrantUrl = _options.QdrantUrl,
-            QdrantCollection = BrainStorage.CollectionName(projectRoot),
-            VectorDimension = previous?.EmbeddingModel == _options.EmbeddingModel ? previous.VectorDimension : 0,
+            EmbeddingProvider = "LocalOnnx",
+            EmbeddingModel = "BAAI/bge-small-en-v1.5",
+            VectorDbProvider = "SqliteLocal",
+            Collection = BrainStorage.CollectionName(projectRoot),
+            VectorDimension = previous?.VectorDimension ?? 0,
             Status = ProjectBrainStatus.SemanticIndexing,
             QuickBrainStatus = ProjectBrainStatus.Ready,
             SemanticBrainStatus = ProjectBrainStatus.SemanticIndexing,
@@ -397,6 +433,50 @@ public sealed class ProjectBrainService : IDisposable
 
     private string BrainPath(string projectRoot) =>
         Path.Combine(BrainStorage.BrainDirectory(_baseDirectory), $"brain-{BrainStorage.ProjectKey(projectRoot)}.json");
+
+    public string? SkippedReportPath(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return null;
+        }
+
+        var path = BrainStorage.SkippedReportPath(_baseDirectory, projectRoot);
+        return File.Exists(path) ? path : null;
+    }
+
+    public IReadOnlyList<SkippedFile> LoadSkippedReport(string? projectRoot)
+    {
+        var path = SkippedReportPath(projectRoot);
+        if (path is null)
+        {
+            return Array.Empty<SkippedFile>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<SkippedFile>>(File.ReadAllText(path), BrainJson.Options) ?? new List<SkippedFile>();
+        }
+        catch
+        {
+            return Array.Empty<SkippedFile>();
+        }
+    }
+
+    private void SaveSkippedReport(string projectRoot, IReadOnlyList<SkippedFile> skipped)
+    {
+        try
+        {
+            var ordered = skipped.OrderBy(item => item.Path, StringComparer.OrdinalIgnoreCase).ToList();
+            File.WriteAllText(
+                BrainStorage.SkippedReportPath(_baseDirectory, projectRoot),
+                JsonSerializer.Serialize(ordered, BrainJson.Options));
+        }
+        catch
+        {
+            // Skipped report is diagnostic only; never fail indexing over it.
+        }
+    }
 
     private void SaveBrain(ProjectBrainData brain)
     {

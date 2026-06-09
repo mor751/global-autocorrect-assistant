@@ -219,16 +219,17 @@
                                 <Border Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="Quick Brain" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="QuickBrainStatusText" Text="No folder" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Semantic RAG" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="SemanticStatusText" Text="No brain" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Deep Brain" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="DeepBrainStatusText" Text="Pending" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Qdrant" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="QdrantStatusText" Text="Checking" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="FastEmbed" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="FastEmbedStatusText" Text="Checking" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Vector DB (SQLite)" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="VectorStoreStatusText" Text="Checking" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Embedder (ONNX)" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="EmbedderStatusText" Text="Checking" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0,0,0"><StackPanel><TextBlock Text="Gemma3" Foreground="{StaticResource Ink}" FontWeight="SemiBold" /><TextBlock x:Name="GemmaStatusText" Text="Local model" Foreground="{StaticResource Muted}" Margin="0,6,0,0" /></StackPanel></Border>
                             </UniformGrid>
 
-                            <UniformGrid Columns="6" Margin="0,0,0,14">
+                            <UniformGrid Columns="7" Margin="0,0,0,14">
                                 <Border Style="{StaticResource Card}" Margin="0,0,8,0"><StackPanel><TextBlock Text="Scanned Files" Style="{StaticResource Label}" /><TextBlock x:Name="ScannedFilesText" Text="0" Foreground="{StaticResource Ink}" FontSize="24" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Indexed Files" Style="{StaticResource Label}" /><TextBlock x:Name="IndexedFilesText" Text="0" Foreground="{StaticResource Ink}" FontSize="24" Margin="0,10,0,0" /></StackPanel></Border>
-                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Total Chunks" Style="{StaticResource Label}" /><TextBlock x:Name="ChunkCountText" Text="0" Foreground="{StaticResource Ink}" FontSize="24" Margin="0,10,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Embedded Chunks" Style="{StaticResource Label}" /><TextBlock x:Name="ChunkCountText" Text="0" Foreground="{StaticResource Ink}" FontSize="24" Margin="0,10,0,0" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Total Vectors" Style="{StaticResource Label}" /><TextBlock x:Name="VectorCountText" Text="0" Foreground="{StaticResource Ink}" FontSize="24" Margin="0,10,0,0" /></StackPanel></Border>
+                                <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Skipped Files" Style="{StaticResource Label}" /><TextBlock x:Name="SkippedFilesText" Text="0" Foreground="#F7C948" FontSize="24" Margin="0,10,0,0" /><TextBlock Text="View report" Foreground="#67E8F9" FontSize="11" Margin="0,6,0,0" Cursor="Hand" MouseLeftButtonUp="OpenSkippedReport_OnClick" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0"><StackPanel><TextBlock Text="Last Indexed" Style="{StaticResource Label}" /><TextBlock x:Name="LastIndexedText" Text="Never" Foreground="{StaticResource Ink}" FontSize="14" Margin="0,12,0,0" TextWrapping="Wrap" /></StackPanel></Border>
                                 <Border Style="{StaticResource Card}" Margin="8,0,0,0"><StackPanel><TextBlock Text="Current Mode" Style="{StaticResource Label}" /><TextBlock x:Name="CurrentModeText" Text="No brain" Foreground="{StaticResource Ink}" FontSize="16" Margin="0,12,0,0" TextWrapping="Wrap" /></StackPanel></Border>
                             </UniformGrid>
@@ -286,13 +287,15 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="Diagnostics" Foreground="{StaticResource Ink}" FontSize="17" FontWeight="SemiBold" />
                                         <TextBlock x:Name="DiagnosticsText" Text="Diagnostics not run yet." Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Test FastEmbed" Style="{StaticResource SecondaryButton}" Click="TestFastEmbed_OnClick" Margin="12,0,8,0" />
-                                    <Button Grid.Column="2" Content="Test Qdrant" Style="{StaticResource SecondaryButton}" Click="TestQdrant_OnClick" />
+                                    <Button Grid.Column="1" Content="Test Embedder" Style="{StaticResource SecondaryButton}" Click="TestEmbedder_OnClick" Margin="12,0,8,0" />
+                                    <Button Grid.Column="2" Content="Test Vector DB" Style="{StaticResource SecondaryButton}" Click="TestVectorStore_OnClick" Margin="0,0,8,0" />
+                                    <Button Grid.Column="3" Content="Brain Map" Style="{StaticResource SecondaryButton}" Click="BrainMap_OnClick" />
                                 </Grid>
                             </Border>
                         </StackPanel>
@@ -374,7 +377,7 @@
                         <Border Style="{StaticResource Card}" Margin="0,0,0,14">
                             <UniformGrid Columns="6">
                                 <StackPanel><TextBlock Text="Vector DB Status" Style="{StaticResource Label}" /><TextBlock x:Name="VectorDbStatusText" Text="Checking" Foreground="{StaticResource Ink}" Margin="0,8,0,0" /></StackPanel>
-                                <StackPanel><TextBlock Text="URL" Style="{StaticResource Label}" /><TextBlock x:Name="VectorUrlText" Text="http://localhost:6333" Foreground="{StaticResource Ink}" Margin="0,8,0,0" TextWrapping="Wrap" /></StackPanel>
+                                <StackPanel><TextBlock Text="Storage" Style="{StaticResource Label}" /><TextBlock x:Name="VectorStorageText" Text="SQLite (local)" Foreground="{StaticResource Ink}" Margin="0,8,0,0" TextWrapping="Wrap" /></StackPanel>
                                 <StackPanel><TextBlock Text="Collection" Style="{StaticResource Label}" /><TextBlock x:Name="CollectionText" Text="No collection" Foreground="{StaticResource Ink}" Margin="0,8,0,0" TextWrapping="Wrap" /></StackPanel>
                                 <StackPanel><TextBlock Text="Embedding Model" Style="{StaticResource Label}" /><TextBlock x:Name="EmbeddingModelText" Text="BAAI/bge-small-en-v1.5" Foreground="{StaticResource Ink}" Margin="0,8,0,0" TextWrapping="Wrap" /></StackPanel>
                                 <StackPanel><TextBlock Text="Vector Dimension" Style="{StaticResource Label}" /><TextBlock x:Name="VectorDimensionText" Text="384" Foreground="{StaticResource Ink}" Margin="0,8,0,0" /></StackPanel>

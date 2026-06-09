@@ -55,15 +55,15 @@ public enum ProjectBrainStatus
     Ready,
     PartialReady,
     Error,
-    QdrantUnavailable,
+    VectorStoreUnavailable,
     EmbeddingUnavailable,
     ReindexRequired
 }
 
 public enum RetrievalMode
 {
-    SemanticQdrant,
-    HybridQdrantKeyword,
+    SemanticVector,
+    HybridVectorKeyword,
     KeywordFallback,
     NoBrain
 }
@@ -123,12 +123,19 @@ public sealed class ProjectChunk
     }
 }
 
+public sealed class SkippedFile
+{
+    public string Path { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+}
+
 public sealed class ProjectIndexSnapshot
 {
     public ProjectBrainData Brain { get; set; } = new();
     public List<ProjectChunk> Chunks { get; set; } = new();
     public int SkippedFiles { get; set; }
     public List<string> SkippedReasons { get; set; } = new();
+    public List<SkippedFile> SkippedDetails { get; set; } = new();
 }
 
 public sealed class ProjectIndexMetadata
@@ -137,12 +144,11 @@ public sealed class ProjectIndexMetadata
     public string ProjectRoot { get; set; } = string.Empty;
     public string ProjectName { get; set; } = string.Empty;
     public string Framework { get; set; } = "unknown";
-    public string EmbeddingProvider { get; set; } = "FastEmbed";
+    public string EmbeddingProvider { get; set; } = "LocalOnnx";
     public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
     public int VectorDimension { get; set; }
-    public string VectorDbProvider { get; set; } = "QdrantLocal";
-    public string QdrantUrl { get; set; } = "http://localhost:6333";
-    public string QdrantCollection { get; set; } = string.Empty;
+    public string VectorDbProvider { get; set; } = "SqliteLocal";
+    public string Collection { get; set; } = string.Empty;
     public ProjectBrainStatus Status { get; set; } = ProjectBrainStatus.NoFolder;
     public ProjectBrainStatus QuickBrainStatus { get; set; } = ProjectBrainStatus.NoFolder;
     public ProjectBrainStatus SemanticBrainStatus { get; set; } = ProjectBrainStatus.NoFolder;
@@ -164,7 +170,7 @@ public sealed class ProjectIndexMetadata
         {
             ProjectBrainStatus.Ready => "Semantic + keyword",
             ProjectBrainStatus.PartialReady => "Partial semantic + keyword",
-            ProjectBrainStatus.QdrantUnavailable => "Keyword fallback",
+            ProjectBrainStatus.VectorStoreUnavailable => "Keyword fallback",
             ProjectBrainStatus.EmbeddingUnavailable => "Keyword fallback",
             _ => "No brain"
         };
@@ -207,6 +213,7 @@ public sealed class PromptCompilerRequest
     public ProjectBrainData? Brain { get; set; }
     public RetrievalResponse Retrieval { get; set; } = new();
     public IReadOnlyList<string> UserConstraints { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> MissingContext { get; set; } = Array.Empty<string>();
 }
 
 public sealed class PromptCompilerResult

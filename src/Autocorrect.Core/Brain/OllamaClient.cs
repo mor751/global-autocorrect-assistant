@@ -9,6 +9,12 @@ public sealed record OllamaSettings(string Endpoint, string ChatModel, string Em
     public static OllamaSettings Default { get; } = new("http://localhost:11434", "gemma3:4b", "nomic-embed-text");
 }
 
+// Generation knobs; NumPredict <= 0 means "let the model decide" (no cap sent).
+public sealed record OllamaGenerateOptions(double Temperature = 0.2, int NumPredict = 0)
+{
+    public static OllamaGenerateOptions Default { get; } = new();
+}
+
 public interface IOllamaClient
 {
     Task<bool> IsAvailableAsync(CancellationToken cancellationToken);
@@ -16,6 +22,8 @@ public interface IOllamaClient
     Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken);
 
     Task<string?> GenerateAsync(string prompt, CancellationToken cancellationToken);
+
+    Task<string?> GenerateAsync(string prompt, OllamaGenerateOptions options, CancellationToken cancellationToken);
 
     Task<float[]?> EmbedAsync(string text, CancellationToken cancellationToken);
 }
@@ -77,19 +85,26 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
         }
     }
 
-    public async Task<string?> GenerateAsync(string prompt, CancellationToken cancellationToken)
+    public Task<string?> GenerateAsync(string prompt, CancellationToken cancellationToken) =>
+        GenerateAsync(prompt, OllamaGenerateOptions.Default, cancellationToken);
+
+    public async Task<string?> GenerateAsync(string prompt, OllamaGenerateOptions options, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(prompt))
         {
             return null;
         }
 
+        object generationOptions = options.NumPredict > 0
+            ? new { temperature = options.Temperature, num_predict = options.NumPredict }
+            : new { temperature = options.Temperature };
+
         var payload = new
         {
             model = string.IsNullOrWhiteSpace(_settings.ChatModel) ? OllamaSettings.Default.ChatModel : _settings.ChatModel,
             prompt,
             stream = false,
-            options = new { temperature = 0.2 }
+            options = generationOptions
         };
 
         try

@@ -11,7 +11,8 @@ var tests = new (string Name, Action Run)[]
     ("brain detailed index creates hashed chunks", BrainDetailedIndexCreatesHashedChunks),
     ("markdown chunker splits by headings", MarkdownChunkerSplitsByHeadings),
     ("prompt compiler fallback does not invent files", PromptCompilerFallbackDoesNotInventFiles),
-    ("qdrant unavailable is reported gracefully", QdrantUnavailableIsReportedGracefully),
+    ("sqlite vector store round-trips and ranks by cosine", SqliteVectorStoreRoundTripsAndRanks),
+    ("wordpiece tokenizer wraps with cls and sep", WordPieceTokenizerWrapsWithClsAndSep),
     ("brain retrieval finds login file for animation prompt", BrainRetrievalFindsLoginFile),
     ("prompt analyzer flags vague prompt", PromptAnalyzerFlagsVaguePrompt),
     ("smart rewriter works without ollama", SmartRewriterWorksWithoutOllama),
@@ -418,13 +419,64 @@ static void PromptCompilerFallbackDoesNotInventFiles()
     Assert.False(result.OptimizedPrompt.Contains("src/app/api/auth/route.ts", StringComparison.Ordinal), "Must not invent files.");
 }
 
-static void QdrantUnavailableIsReportedGracefully()
+static void SqliteVectorStoreRoundTripsAndRanks()
 {
-    using var store = new QdrantVectorStore("http://localhost:63339");
-    var stats = store.GetStatsAsync("woody_project_missing", CancellationToken.None).GetAwaiter().GetResult();
+    var baseDir = Path.Combine(Path.GetTempPath(), "woody_sqlite_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(baseDir);
+    try
+    {
+        using var store = new SqliteVectorStore(baseDir);
+        const string collection = "woody_project_test";
+        Assert.True(store.EnsureCollectionAsync(collection, 3, CancellationToken.None).GetAwaiter().GetResult(), "Collection should initialize.");
 
-    Assert.False(stats.IsAvailable, "Expected unavailable Qdrant status.");
-    Assert.True(!string.IsNullOrWhiteSpace(stats.Error), "Expected clear error.");
+        var chunks = new List<ProjectChunk>
+        {
+            new() { Id = "a", FilePath = "src/a.cs", FileName = "a.cs", Content = "alpha", ContentPreview = "alpha" },
+            new() { Id = "b", FilePath = "src/b.cs", FileName = "b.cs", Content = "beta", ContentPreview = "beta" }
+        };
+        var vectors = new List<float[]>
+        {
+            new[] { 1f, 0f, 0f },
+            new[] { 0f, 1f, 0f }
+        };
+        store.UpsertAsync(collection, chunks, vectors, CancellationToken.None).GetAwaiter().GetResult();
+
+        var stats = store.GetStatsAsync(collection, CancellationToken.None).GetAwaiter().GetResult();
+        Assert.True(stats.IsAvailable, "SQLite store should be available.");
+        Assert.Equal(2L, stats.VectorCount);
+        Assert.Equal(3, stats.VectorDimension);
+
+        var results = store.SearchAsync(collection, new[] { 0.9f, 0.1f, 0f }, 5, CancellationToken.None).GetAwaiter().GetResult();
+        Assert.True(results.Count > 0, "Search should return results.");
+        Assert.Equal("src/a.cs", results[0].FilePath);
+    }
+    finally
+    {
+        try { Directory.Delete(baseDir, true); } catch { }
+    }
+}
+
+static void WordPieceTokenizerWrapsWithClsAndSep()
+{
+    var vocabPath = Path.Combine(Path.GetTempPath(), "woody_vocab_" + Guid.NewGuid().ToString("N") + ".txt");
+    File.WriteAllLines(vocabPath, new[] { "[PAD]", "[UNK]", "[CLS]", "[SEP]", "hello", "world" });
+    try
+    {
+        var tokenizer = new WordPieceTokenizer(vocabPath, 64);
+        var (ids, mask) = tokenizer.Encode("hello world");
+
+        Assert.Equal(4, ids.Length);
+        Assert.Equal(2L, ids[0]);
+        Assert.Equal(4L, ids[1]);
+        Assert.Equal(5L, ids[2]);
+        Assert.Equal(3L, ids[^1]);
+        Assert.Equal(ids.Length, mask.Length);
+        Assert.True(mask.All(value => value == 1L), "Attention mask should be all ones for unpadded input.");
+    }
+    finally
+    {
+        try { File.Delete(vocabPath); } catch { }
+    }
 }
 
 static void PromptAnalyzerFlagsVaguePrompt()
@@ -535,6 +587,8 @@ internal sealed class FakeOllamaClient : IOllamaClient
     public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 
     public Task<string?> GenerateAsync(string prompt, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+
+    public Task<string?> GenerateAsync(string prompt, OllamaGenerateOptions options, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 
     public Task<float[]?> EmbedAsync(string text, CancellationToken cancellationToken) => Task.FromResult<float[]?>(null);
 }

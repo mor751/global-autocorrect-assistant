@@ -26,7 +26,7 @@ public sealed class PromptCompilerService
         }
 
         var writerPrompt = BuildWriterPrompt(request, cleaned);
-        var response = await _writer.GenerateAsync(writerPrompt, cancellationToken);
+        var response = await _writer.GenerateAsync(writerPrompt, new OllamaGenerateOptions(0.15, 450), cancellationToken);
         var parsed = TryParseStructured(response);
         if (parsed is not null && !string.IsNullOrWhiteSpace(parsed.OptimizedPrompt))
         {
@@ -68,40 +68,39 @@ public sealed class PromptCompilerService
             .Select(result => result.FilePath)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(8)
+            .Take(3)
             .ToList();
         var stack = request.Brain?.Stack.Describe().ToList() ?? new List<string>();
         var task = ToImperative(cleaned);
 
         var builder = new StringBuilder();
-        builder.AppendLine(task).AppendLine();
-        builder.AppendLine("Project context:");
-        builder.AppendLine(stack.Count > 0
-            ? $"This appears to be a {string.Join(" + ", stack)} project."
-            : "Project stack is unknown.");
-        builder.AppendLine();
+        builder.AppendLine($"Task: {task}");
+        if (stack.Count > 0)
+        {
+            builder.AppendLine($"Stack: {string.Join(", ", stack)}");
+        }
 
         if (files.Count > 0)
         {
-            builder.AppendLine("Inspect these files first:");
+            builder.AppendLine("Files:");
             foreach (var file in files)
             {
                 builder.AppendLine($"- {file}");
             }
         }
-        else
+        else if (request.MissingContext.Count > 0)
         {
-            builder.AppendLine("No exact relevant files found. Start by searching for:");
-            builder.AppendLine($"- {cleaned}");
+            builder.AppendLine("Missing context (add before sending):");
+            foreach (var missing in request.MissingContext.Take(3))
+            {
+                builder.AppendLine($"- {missing}");
+            }
         }
 
-        builder.AppendLine();
-        builder.AppendLine("Tasks:");
-        builder.AppendLine("1. Identify the smallest relevant change.");
-        builder.AppendLine("2. Preserve existing behavior unless the prompt explicitly asks to change it.");
-        builder.AppendLine("3. Improve only the files directly related to this request.");
-        builder.AppendLine("4. Do not refactor unrelated UI, routes, services, or tests.");
-        builder.AppendLine("5. Before editing, explain the likely cause and the minimal files you plan to change.");
+        builder.AppendLine("Do:");
+        builder.AppendLine("- Inspect the listed files first, then make the smallest change that satisfies the task.");
+        builder.AppendLine("Avoid:");
+        builder.AppendLine("- Refactoring unrelated files, routes, or tests.");
 
         return new PromptCompilerResult
         {
@@ -110,27 +109,50 @@ public sealed class PromptCompilerService
             Tasks = new List<string> { task },
             Constraints = new List<string>
             {
-                "Only mention real files from retrieval.",
-                "Avoid unrelated refactors.",
-                "Inspect relevant files before editing."
+                "Only edit listed files.",
+                "Avoid unrelated refactors."
             },
             TokenSavingReason = "Focused the request on retrieved project files to reduce repo-wide searching.",
             RetrievalSummary = $"{request.Retrieval.RetrievalMode}: {files.Count} files"
         };
     }
 
+    private const int MaxWriterChunks = 5;
+    private const int MaxChunkChars = 700;
+
+    private const string WriterInstruction =
+        "You are Woody, a Project-Aware Prompt Compiler for coding agents (Cursor, Codex, Claude Code). " +
+        "Rewrite the user's messy request into ONE precise, token-efficient prompt the agent can act on immediately.\n" +
+        "Hard rules:\n" +
+        "- optimizedPrompt must be <= 150 words. No filler, no preamble, do not repeat these rules.\n" +
+        "- Only use file paths found in retrievedContext. Never invent paths.\n" +
+        "- Reference only the 1-3 most relevant files; drop weakly related ones.\n" +
+        "- Keep the user's original intent and every concrete detail.\n" +
+        "- Tell the agent to inspect those files first and not refactor unrelated code.\n" +
+        "- If missingContext is non-empty or the request is too vague to act on, make optimizedPrompt a short clarifying question listing what is missing, and copy those items into warnings.\n" +
+        "optimizedPrompt must follow this skeleton, omitting empty sections:\n" +
+        "Task: <one sentence>\n" +
+        "Files: <path - why it matters>\n" +
+        "Do: <2-4 short imperative steps>\n" +
+        "Avoid: <1-2 short limits>\n" +
+        "Return strict JSON with keys: optimizedPrompt, relevantFiles, tasks, constraints, tokenSavingReason, warnings.";
+
+    private const string WriterExample =
+        "Example response:\n" +
+        "{\"optimizedPrompt\":\"Task: Fix the login form entry animation.\\nFiles: src/components/LoginForm.tsx - animation is defined here\\nDo:\\n- Inspect LoginForm.tsx first\\n- Adjust the entry animation timing/easing\\nAvoid:\\n- Changing auth logic or unrelated files\"," +
+        "\"relevantFiles\":[\"src/components/LoginForm.tsx\"],\"tasks\":[\"Fix login form animation\"],\"constraints\":[\"Do not touch auth logic\"],\"tokenSavingReason\":\"Pointed the agent to one real file\",\"warnings\":[]}";
+
+    // Feeds Gemma a tight instruction, a worked example, and real code for the few most relevant chunks.
     private static string BuildWriterPrompt(PromptCompilerRequest request, string cleaned)
     {
-        var stack = request.Brain?.Stack.Describe().ToList();
-        var chunks = request.Retrieval.Results.Take(8).Select(result => new
+        var stack = request.Brain?.Stack.Describe().ToList() ?? new List<string>();
+        var chunks = request.Retrieval.Results.Take(MaxWriterChunks).Select(result => new
         {
-            result.FilePath,
-            result.ChunkType,
-            result.Symbol,
-            result.StartLine,
-            result.EndLine,
-            result.Reason,
-            Preview = result.ContentPreview
+            file = result.FilePath,
+            symbol = string.IsNullOrWhiteSpace(result.Symbol) ? "none" : result.Symbol,
+            lines = $"{result.StartLine}-{result.EndLine}",
+            why = result.Reason,
+            code = TrimCode(string.IsNullOrWhiteSpace(result.Content) ? result.ContentPreview : result.Content)
         });
 
         var payload = JsonSerializer.Serialize(new
@@ -139,15 +161,22 @@ public sealed class PromptCompilerService
             targetAgent = request.TargetAgent.ToString(),
             projectStack = stack,
             retrievalMode = request.Retrieval.RetrievalMode.ToString(),
+            missingContext = request.MissingContext,
             retrievedContext = chunks
         }, BrainJson.Options);
 
-        return "You are Woody, a local Project-Aware Prompt Compiler for coding agents. " +
-               "Rewrite the user's messy request into a precise, token-efficient prompt. " +
-               "Only mention file paths present in retrievedContext. Never invent paths. " +
-               "Tell the coding agent to inspect relevant files first and avoid unrelated refactors. " +
-               "Return strict JSON with keys: optimizedPrompt, relevantFiles, tasks, constraints, tokenSavingReason, warnings.\n\n" +
-               payload;
+        return $"{WriterInstruction}\n\n{WriterExample}\n\nNow compile this:\n{payload}";
+    }
+
+    private static string TrimCode(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return string.Empty;
+        }
+
+        var normalized = content.Replace("\r\n", "\n").Trim();
+        return normalized.Length <= MaxChunkChars ? normalized : normalized[..MaxChunkChars] + "\n...";
     }
 
     private static PromptCompilerResult? TryParseStructured(string? response)

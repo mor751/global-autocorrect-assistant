@@ -21,11 +21,13 @@ public partial class DashboardWindow : Window
     private readonly Action _chooseFolder;
     private readonly Func<Task> _reindexProject;
     private readonly Action _openRag;
-    private readonly Func<Task> _showQdrantStatus;
+    private readonly Func<Task> _showVectorStoreStatus;
     private readonly Action _openProjectBrain;
     private readonly Action _setPetImage;
+    private readonly Action _reapplySettings;
     private VectorStoreStats? _lastVectorStats;
     private RetrievalResponse? _lastRetrieval;
+    private ProjectIndexMetadata? _lastMetadata;
 
     public DashboardWindow(
         TokenUsageStore store,
@@ -36,9 +38,10 @@ public partial class DashboardWindow : Window
         Action chooseFolder,
         Func<Task> reindexProject,
         Action openRag,
-        Func<Task> showQdrantStatus,
+        Func<Task> showVectorStoreStatus,
         Action openProjectBrain,
-        Action setPetImage)
+        Action setPetImage,
+        Action reapplySettings)
     {
         InitializeComponent();
         _store = store;
@@ -49,21 +52,38 @@ public partial class DashboardWindow : Window
         _chooseFolder = chooseFolder;
         _reindexProject = reindexProject;
         _openRag = openRag;
-        _showQdrantStatus = showQdrantStatus;
+        _showVectorStoreStatus = showVectorStoreStatus;
         _openProjectBrain = openProjectBrain;
         _setPetImage = setPetImage;
+        _reapplySettings = reapplySettings;
         Loaded += async (_, _) =>
         {
             ShowPage(DashboardPage, DashboardNav, "RAG Dashboard", "Monitor your Retrieval-Augmented Generation pipeline and knowledge brain.");
-            Refresh();
-            await RefreshAsync();
+            await FullRefreshAsync();
         };
+    }
+
+    // Single entry point so any Refresh truly reruns: re-apply settings, reload disk state, re-test live services.
+    private async Task FullRefreshAsync()
+    {
+        try
+        {
+            _reapplySettings();
+        }
+        catch (Exception ex)
+        {
+            DiagnosticsText.Text = $"Settings reapply failed: {ex.Message}";
+        }
+
+        Refresh();
+        await RefreshAsync();
     }
 
     public void Refresh()
     {
         var brain = _projectBrain.LoadBrain(_settings.ProjectRoot);
         var metadata = _projectBrain.LoadIndexMetadata(_settings.ProjectRoot);
+        _lastMetadata = metadata ?? _lastMetadata;
         var snapshot = _store.Snapshot();
         var status = _lastErrorProvider() is { Length: > 0 } error ? $"{_statusProvider()}: {error}" : _statusProvider();
 
@@ -84,7 +104,10 @@ public partial class DashboardWindow : Window
 
         ScannedFilesText.Text = (metadata?.TotalFiles ?? brain?.Files.Count ?? 0).ToString("N0");
         IndexedFilesText.Text = (metadata?.IndexedFiles ?? brain?.Files.Count ?? 0).ToString("N0");
-        ChunkCountText.Text = (metadata?.TotalChunks ?? brain?.Files.Sum(f => f.PreviewChunks.Count) ?? 0).ToString("N0");
+        ChunkCountText.Text = metadata is null
+            ? (brain?.Files.Sum(f => f.PreviewChunks.Count) ?? 0).ToString("N0")
+            : $"{metadata.EmbeddedChunks:N0} / {metadata.TotalChunks:N0}";
+        SkippedFilesText.Text = (metadata?.SkippedFiles ?? 0).ToString("N0");
         VectorCountText.Text = (_lastVectorStats?.VectorCount ?? metadata?.EmbeddedChunks ?? 0).ToString("N0");
         LastIndexedText.Text = metadata?.LastIndexedAt?.ToLocalTime().ToString("MMM d, HH:mm") ??
                                brain?.IndexedAt.ToLocalTime().ToString("MMM d, HH:mm") ??
@@ -114,18 +137,19 @@ public partial class DashboardWindow : Window
 
     private async Task RefreshAsync()
     {
-        _lastVectorStats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
-        QdrantStatusText.Text = _lastVectorStats.IsAvailable ? "Connected" : $"Unavailable: {_lastVectorStats.Error}";
-        QdrantStatusText.Foreground = BrushFor(_lastVectorStats.IsAvailable ? "ready" : "error");
-        VectorCountText.Text = (_lastVectorStats.VectorCount > 0 ? _lastVectorStats.VectorCount : _projectBrain.LoadIndexMetadata(_settings.ProjectRoot)?.EmbeddedChunks ?? 0).ToString("N0");
-        VectorDbStatusText.Text = _lastVectorStats.IsAvailable ? "Qdrant Local Online" : $"Offline: {_lastVectorStats.Error}";
+        var projectRoot = _lastMetadata?.ProjectRoot ?? _settings.ProjectRoot;
+        _lastVectorStats = await _projectBrain.GetVectorStatsAsync(projectRoot, CancellationToken.None);
+        VectorStoreStatusText.Text = _lastVectorStats.IsAvailable ? "Connected" : $"Unavailable: {_lastVectorStats.Error}";
+        VectorStoreStatusText.Foreground = BrushFor(_lastVectorStats.IsAvailable ? "ready" : "error");
+        VectorCountText.Text = (_lastVectorStats.VectorCount > 0 ? _lastVectorStats.VectorCount : _lastMetadata?.EmbeddedChunks ?? 0).ToString("N0");
+        VectorDbStatusText.Text = _lastVectorStats.IsAvailable ? "SQLite vector DB online" : $"Offline: {_lastVectorStats.Error}";
         VectorDbStatusText.Foreground = BrushFor(_lastVectorStats.IsAvailable ? "ready" : "error");
         VectorFooterText.Text = _lastVectorStats.IsAvailable
             ? $"Collection: {_lastVectorStats.CollectionName} | vectors: {_lastVectorStats.VectorCount:N0}"
-            : $"Qdrant unavailable at {_settings.QdrantUrl} ({Empty(_lastVectorStats.Error)}). Start it: {QdrantVectorStore.StartCommand}";
+            : $"Local vector store unavailable ({Empty(_lastVectorStats.Error)}).";
 
-        var diagnostics = await _projectBrain.TestFastEmbedAsync(CancellationToken.None);
-        ApplyFastEmbedDiagnostics(diagnostics);
+        var diagnostics = await _projectBrain.TestEmbeddingAsync(CancellationToken.None);
+        ApplyEmbeddingDiagnostics(diagnostics);
     }
 
     private void PromptsToPlaceholder(TokenUsageState snapshot)
@@ -168,17 +192,16 @@ public partial class DashboardWindow : Window
 
     private void RefreshVectorPage(ProjectIndexMetadata? metadata)
     {
-        VectorUrlText.Text = _settings.QdrantUrl;
-        CollectionText.Text = metadata?.QdrantCollection ?? "No collection";
-        EmbeddingModelText.Text = _settings.EmbeddingModel;
+        VectorStorageText.Text = "SQLite (local)";
+        CollectionText.Text = metadata?.Collection ?? "No collection";
+        EmbeddingModelText.Text = "BAAI/bge-small-en-v1.5 (ONNX, in-process)";
         VectorDimensionText.Text = metadata?.VectorDimension > 0 ? metadata.VectorDimension.ToString() : "384 expected";
         VectorTotalsText.Text = $"{_lastVectorStats?.VectorCount ?? metadata?.EmbeddedChunks ?? 0:N0} / {metadata?.TotalChunks ?? 0:N0}";
     }
 
     private async void Refresh_OnClick(object sender, RoutedEventArgs e)
     {
-        Refresh();
-        await RefreshAsync();
+        await FullRefreshAsync();
     }
 
     private void ChooseFolder_OnClick(object sender, RoutedEventArgs e) => _chooseFolder();
@@ -186,15 +209,14 @@ public partial class DashboardWindow : Window
     private async void Reindex_OnClick(object sender, RoutedEventArgs e)
     {
         await _reindexProject();
-        Refresh();
-        await RefreshAsync();
+        await FullRefreshAsync();
     }
 
     private void OpenRag_OnClick(object sender, RoutedEventArgs e) => ShowPage(BrainPage, BrainNav, "Woody Brain", "Visualize your project knowledge brain and compile better prompts.");
 
-    private async void QdrantStatus_OnClick(object sender, RoutedEventArgs e)
+    private async void VectorStoreStatus_OnClick(object sender, RoutedEventArgs e)
     {
-        await TestQdrantAsync();
+        await TestVectorStoreAsync();
     }
 
     private void ProjectBrain_OnClick(object sender, RoutedEventArgs e) => ShowPage(BrainPage, BrainNav, "Woody Brain", "Visualize your project knowledge brain and compile better prompts.");
@@ -211,30 +233,29 @@ public partial class DashboardWindow : Window
 
     private void ProjectsNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Projects", "Choose a project folder from the dashboard or Woody Brain page.");
 
-    private void SettingsNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Settings", $"FastEmbed sidecar: {_settings.FastEmbedSidecarUrl}\nQdrant: {_settings.QdrantUrl}\nWriter: {_settings.WriterModel}");
+    private void SettingsNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Settings", $"Embedder: bge-small ONNX (in-process)\nVector DB: SQLite (local)\nWriter: {_settings.WriterModel}");
 
-    private async void TestFastEmbed_OnClick(object sender, RoutedEventArgs e)
+    private async void TestEmbedder_OnClick(object sender, RoutedEventArgs e)
     {
-        DiagnosticsText.Text = "Testing FastEmbed...";
-        var diagnostics = await _projectBrain.TestFastEmbedAsync(CancellationToken.None);
-        ApplyFastEmbedDiagnostics(diagnostics);
+        DiagnosticsText.Text = "Testing local embedder (this downloads the model on first run)...";
+        var diagnostics = await _projectBrain.TestEmbeddingAsync(CancellationToken.None);
+        ApplyEmbeddingDiagnostics(diagnostics);
     }
 
-    private async void TestQdrant_OnClick(object sender, RoutedEventArgs e)
+    private async void TestVectorStore_OnClick(object sender, RoutedEventArgs e)
     {
-        await TestQdrantAsync();
+        await TestVectorStoreAsync();
     }
 
-    private async Task TestQdrantAsync()
+    private async Task TestVectorStoreAsync()
     {
-        DiagnosticsText.Text = $"Testing Qdrant at {_settings.QdrantUrl}...";
-        _lastVectorStats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
+        DiagnosticsText.Text = "Testing local SQLite vector store...";
+        _lastVectorStats = await _projectBrain.GetVectorStatsAsync(_lastMetadata?.ProjectRoot ?? _settings.ProjectRoot, CancellationToken.None);
         DiagnosticsText.Text = _lastVectorStats.IsAvailable
-            ? $"Qdrant connected at {_settings.QdrantUrl}. Collection: {_lastVectorStats.CollectionName}. Vectors: {_lastVectorStats.VectorCount:N0}. Dimension: {_lastVectorStats.VectorDimension}."
-            : $"Qdrant URL: {_settings.QdrantUrl}\n" +
+            ? $"SQLite vector DB online. Collection: {_lastVectorStats.CollectionName}. Vectors: {_lastVectorStats.VectorCount:N0}. Dimension: {_lastVectorStats.VectorDimension}."
+            : $"Vector DB: SQLite (local)\n" +
               $"Status: unavailable\n" +
-              $"Error: {Empty(_lastVectorStats.Error)}\n\n" +
-              $"Start Qdrant locally:\n{QdrantVectorStore.StartCommand}";
+              $"Error: {Empty(_lastVectorStats.Error)}";
         Refresh();
     }
 
@@ -299,12 +320,32 @@ public partial class DashboardWindow : Window
             : row.Result.Content;
     }
 
+    private void BrainMap_OnClick(object sender, RoutedEventArgs e)
+    {
+        new VectorBrainWindow(_settings, _projectBrain) { Owner = this }.Show();
+    }
+
     private void OpenExplorer_OnClick(object sender, RoutedEventArgs e)
     {
         if (!string.IsNullOrWhiteSpace(_settings.ProjectRoot) && Directory.Exists(_settings.ProjectRoot))
         {
             Process.Start(new ProcessStartInfo("explorer.exe", $"\"{_settings.ProjectRoot}\"") { UseShellExecute = true });
         }
+    }
+
+    private void OpenSkippedReport_OnClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var path = _projectBrain.SkippedReportPath(_settings.ProjectRoot);
+        if (path is null || !File.Exists(path))
+        {
+            DiagnosticsText.Text = "No skipped-files report yet. Re-index the project first.";
+            return;
+        }
+
+        var skipped = _projectBrain.LoadSkippedReport(_settings.ProjectRoot);
+        DiagnosticsText.Text = $"{skipped.Count} files skipped (report: {path})\n\n" +
+            string.Join("\n", skipped.Take(60).Select(item => $"{item.Path}  -  {item.Reason}"));
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
     }
 
     private void ShowPlaceholder(string title, string text)
@@ -342,35 +383,27 @@ public partial class DashboardWindow : Window
         nav.Foreground = WpfBrushes.White;
     }
 
-    private void ApplyFastEmbedDiagnostics(FastEmbedDiagnostics diagnostics)
+    private void ApplyEmbeddingDiagnostics(EmbeddingDiagnostics diagnostics)
     {
-        FastEmbedStatusText.Text = diagnostics.SidecarRunning && diagnostics.FastEmbedImportOk && diagnostics.ModelLoaded
+        EmbedderStatusText.Text = diagnostics.Available
             ? $"Ready ({diagnostics.VectorDimension} dim)"
             : diagnostics.Summary();
-        FastEmbedStatusText.Foreground = BrushFor(diagnostics.FastEmbedImportOk && diagnostics.ModelLoaded ? "ready" : "error");
+        EmbedderStatusText.Foreground = BrushFor(diagnostics.Available ? "ready" : "error");
         DiagnosticsText.Text =
-            $"FastEmbed\n" +
-            $"Sidecar URL: {diagnostics.SidecarUrl}\n" +
-            $"Sidecar running: {(diagnostics.SidecarRunning ? "yes" : "no")}\n" +
-            $"Python executable setting: {diagnostics.PythonExecutable}\n" +
-            $"Python path: {Empty(diagnostics.PythonPath)}\n" +
-            $"FastEmbed import: {(diagnostics.FastEmbedImportOk ? "success" : "failed")}\n" +
-            $"Model loaded: {(diagnostics.ModelLoaded ? "yes" : "no")}\n" +
+            $"Local embedder (in-process ONNX)\n" +
+            $"Available: {(diagnostics.Available ? "yes" : "no")}\n" +
+            $"Model downloaded: {(diagnostics.ModelDownloaded ? "yes" : "no")}\n" +
             $"Model: {diagnostics.ModelName}\n" +
+            $"Model path: {Empty(diagnostics.ModelPath)}\n" +
             $"Dimension: {diagnostics.VectorDimension} (expected 384)\n" +
-            $"Test embedding: {(diagnostics.TestEmbeddingOk ? "success" : "not tested/failed")}\n" +
             $"Last check: {diagnostics.LastHealthCheck.ToLocalTime():HH:mm:ss}\n" +
             $"Last error: {Empty(diagnostics.LastError)}";
 
-        if (diagnostics.ModelUnsupported)
+        if (!diagnostics.Available && !diagnostics.ModelDownloaded)
         {
-            var supported = diagnostics.SupportedModels.Count > 0
-                ? string.Join(", ", diagnostics.SupportedModels.Take(12))
-                : FastEmbedModelCatalog.DefaultModel;
             DiagnosticsText.Text +=
-                $"\n\nFix: set the FastEmbed model to {FastEmbedModelCatalog.DefaultModel} (dim 384). " +
-                $"'nomic-embed-text' is an Ollama model and is not valid for FastEmbed.\n" +
-                $"Supported FastEmbed models: {supported}";
+                "\n\nThe embedding model downloads automatically on first use (~130 MB). " +
+                "Ensure the machine has internet access for that one-time download.";
         }
     }
 
@@ -412,6 +445,11 @@ public partial class DashboardWindow : Window
         yield return new { Activity = $"Scanned {metadata.TotalFiles:N0} files", Time = metadata.LastIndexedAt?.ToLocalTime().ToString("HH:mm") ?? "" };
         yield return new { Activity = $"Created {metadata.TotalChunks:N0} chunks", Time = metadata.LastIndexedAt?.ToLocalTime().ToString("HH:mm") ?? "" };
         yield return new { Activity = $"Upserted {metadata.EmbeddedChunks:N0} vectors", Time = metadata.LastIndexedAt?.ToLocalTime().ToString("HH:mm") ?? "" };
+        if (metadata.SkippedFiles > 0)
+        {
+            yield return new { Activity = $"Skipped {metadata.SkippedFiles:N0} files", Time = metadata.LastIndexedAt?.ToLocalTime().ToString("HH:mm") ?? "" };
+        }
+
         if (metadata.FailedChunks > 0)
         {
             yield return new { Activity = $"Failed chunks: {metadata.FailedChunks:N0}", Time = metadata.LastIndexedAt?.ToLocalTime().ToString("HH:mm") ?? "" };

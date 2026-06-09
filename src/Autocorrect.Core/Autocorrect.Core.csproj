@@ -5,6 +5,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Data\frequency_dictionary_en_82_765.txt" />
-    <None Include="Brain\fastembed_sidecar.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.26.0" />
   </ItemGroup>
 </Project>

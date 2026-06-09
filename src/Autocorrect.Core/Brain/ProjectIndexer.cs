@@ -44,10 +44,11 @@ public sealed class ProjectIndexer : IProjectIndexer
 
     public ProjectIndexSnapshot IndexDetailed(string projectRoot, IndexOptions options)
     {
-        var files = _scanner.Scan(projectRoot, options, out var skippedFiles);
+        var files = _scanner.Scan(projectRoot, options, out var skipped);
         var brain = _analyzer.Analyze(projectRoot, files, options);
         var summariesByPath = brain.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
         var chunks = new List<ProjectChunk>();
+        var notEmbedded = new List<SkippedFile>();
 
         foreach (var source in files)
         {
@@ -56,18 +57,22 @@ public sealed class ProjectIndexer : IProjectIndexer
                 continue;
             }
 
-            chunks.AddRange(_chunker.Chunk(source, summary, options.MaxChunksPerFile));
             if (chunks.Count >= options.MaxInitialChunks)
             {
-                break;
+                notEmbedded.Add(new SkippedFile { Path = source.RelativePath, Reason = $"chunk limit reached ({options.MaxInitialChunks})" });
+                continue;
             }
+
+            chunks.AddRange(_chunker.Chunk(source, summary, options.MaxChunksPerFile));
         }
 
+        var allSkipped = skipped.Concat(notEmbedded).ToList();
         return new ProjectIndexSnapshot
         {
             Brain = brain,
             Chunks = chunks,
-            SkippedFiles = skippedFiles
+            SkippedFiles = allSkipped.Count,
+            SkippedDetails = allSkipped
         };
     }
 }

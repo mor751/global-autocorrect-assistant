@@ -1,9 +1,12 @@
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Autocorrect.Core;
 using Autocorrect.Core.Brain;
 using WpfKey = System.Windows.Input.Key;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
+using WpfMessageBox = System.Windows.MessageBox;
 
 namespace Autocorrect.App;
 
@@ -28,7 +31,29 @@ public partial class RagWindow : Window
         _reindexAction = reindexAction;
         _statusProvider = statusProvider;
         _lastErrorProvider = lastErrorProvider;
-        Loaded += (_, _) => Refresh();
+        Loaded += async (_, _) => await RefreshAllAsync();
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        Refresh();
+        await RefreshLiveAsync();
+    }
+
+    // Queries the local SQLite vector store live so the count/status reflect reality, not just cached metadata.
+    private async Task RefreshLiveAsync()
+    {
+        try
+        {
+            var stats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
+            VectorDbText.Text = stats.IsAvailable
+                ? $"{stats.CollectionName} / {stats.VectorCount:N0} vectors / dim {stats.VectorDimension}"
+                : $"SQLite (local) / unavailable: {stats.Error}";
+        }
+        catch (Exception ex)
+        {
+            VectorDbText.Text = $"SQLite (local) / error: {ex.Message}";
+        }
     }
 
     public void Refresh()
@@ -40,24 +65,28 @@ public partial class RagWindow : Window
             : _settings.ProjectRoot;
         StatusText.Text = _lastErrorProvider() is { Length: > 0 } error ? $"{_statusProvider()}: {error}" : _statusProvider();
         VectorDbText.Text = metadata is null
-            ? $"{_settings.QdrantUrl} / not indexed"
-            : $"{metadata.QdrantCollection} / {metadata.CurrentRagMode()} / dim {metadata.VectorDimension}";
+            ? "SQLite (local) / not indexed"
+            : $"{metadata.Collection} / {metadata.CurrentRagMode()} / dim {metadata.VectorDimension}";
 
         if (brain is null)
         {
             FileCountText.Text = "0";
             ChunkCountText.Text = "0";
+            SkippedCountText.Text = "0";
             StackText.Text = "unknown";
             IndexedText.Text = "never";
-            VectorDbText.Text = $"{_settings.QdrantUrl} / no brain";
+            VectorDbText.Text = "SQLite (local) / no brain";
             FilesList.ItemsSource = Array.Empty<object>();
             FolderTree.Items.Clear();
             ResultsList.ItemsSource = Array.Empty<object>();
             return;
         }
 
-        FileCountText.Text = brain.Files.Count.ToString("N0");
-        ChunkCountText.Text = brain.Files.Sum(file => file.PreviewChunks.Count).ToString("N0");
+        FileCountText.Text = (metadata?.TotalFiles ?? brain.Files.Count).ToString("N0");
+        ChunkCountText.Text = metadata is null
+            ? brain.Files.Sum(file => file.PreviewChunks.Count).ToString("N0")
+            : $"{metadata.EmbeddedChunks:N0} / {metadata.TotalChunks:N0}";
+        SkippedCountText.Text = (metadata?.SkippedFiles ?? 0).ToString("N0");
         StackText.Text = string.Join(" / ", brain.Stack.Describe().DefaultIfEmpty("unknown"));
         IndexedText.Text = brain.IndexedAt.ToLocalTime().ToString("MMM d, HH:mm");
         FilesList.ItemsSource = brain.Files
@@ -120,12 +149,33 @@ public partial class RagWindow : Window
     private async void Reindex_OnClick(object sender, RoutedEventArgs e)
     {
         await _reindexAction();
-        Refresh();
+        await RefreshAllAsync();
     }
 
-    private void Refresh_OnClick(object sender, RoutedEventArgs e) => Refresh();
+    private async void Refresh_OnClick(object sender, RoutedEventArgs e) => await RefreshAllAsync();
 
     private void Close_OnClick(object sender, RoutedEventArgs e) => Close();
+
+    private void BrainMap_OnClick(object sender, RoutedEventArgs e)
+    {
+        new VectorBrainWindow(_settings, _projectBrain) { Owner = this }.Show();
+    }
+
+    private void SkippedReport_OnClick(object sender, RoutedEventArgs e)
+    {
+        var path = _projectBrain.SkippedReportPath(_settings.ProjectRoot);
+        if (path is null || !File.Exists(path))
+        {
+            WpfMessageBox.Show("No skipped-files report yet. Re-index the project first.", "Skipped files");
+            return;
+        }
+
+        var skipped = _projectBrain.LoadSkippedReport(_settings.ProjectRoot);
+        var preview = string.Join(Environment.NewLine, skipped.Take(40).Select(item => $"{item.Path}  -  {item.Reason}"));
+        var more = skipped.Count > 40 ? $"{Environment.NewLine}... and {skipped.Count - 40} more (see file)." : string.Empty;
+        WpfMessageBox.Show($"{skipped.Count} files skipped. Report: {path}{Environment.NewLine}{Environment.NewLine}{preview}{more}", "Skipped files");
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+    }
 
     private void RenderFolderTree(ProjectBrainData brain)
     {

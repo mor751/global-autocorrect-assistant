@@ -62,18 +62,22 @@
                 CornerRadius="12"
                 Padding="14"
                 Margin="0,0,0,12">
-            <UniformGrid Columns="6">
+            <UniformGrid Columns="7">
                 <StackPanel>
                     <TextBlock Text="STATUS" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
                     <TextBlock x:Name="StatusText" FontSize="14" FontWeight="SemiBold" Margin="0,4,0,0" />
                 </StackPanel>
                 <StackPanel>
-                    <TextBlock Text="FILES" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
+                    <TextBlock Text="SCANNED FILES" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
                     <TextBlock x:Name="FileCountText" FontSize="18" FontWeight="Bold" Margin="0,4,0,0" />
                 </StackPanel>
                 <StackPanel>
-                    <TextBlock Text="CHUNKS" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
+                    <TextBlock Text="EMBEDDED CHUNKS" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
                     <TextBlock x:Name="ChunkCountText" FontSize="18" FontWeight="Bold" Margin="0,4,0,0" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Text="SKIPPED FILES" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SkippedCountText" FontSize="18" FontWeight="Bold" Margin="0,4,0,0" Foreground="#F7C948" />
                 </StackPanel>
                 <StackPanel>
                     <TextBlock Text="STACK" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" />
@@ -186,6 +190,8 @@
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
             <Button Content="Re-index" Click="Reindex_OnClick" />
+            <Button Content="Brain map" Click="BrainMap_OnClick" />
+            <Button Content="Skipped report" Click="SkippedReport_OnClick" />
             <Button Content="Refresh" Click="Refresh_OnClick" />
             <Button Content="Close" Click="Close_OnClick" />
         </StackPanel>
