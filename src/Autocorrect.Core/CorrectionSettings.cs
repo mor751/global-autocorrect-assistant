@@ -70,6 +70,8 @@ public sealed class CorrectionSettings
 
     public string EmbeddingModel { get; set; } = "BAAI/bge-small-en-v1.5";
 
+    public string OllamaEmbeddingModel { get; set; } = "nomic-embed-text";
+
     public string FastEmbedSidecarUrl { get; set; } = "http://127.0.0.1:8765";
 
     public string PythonExecutable { get; set; } = "python";

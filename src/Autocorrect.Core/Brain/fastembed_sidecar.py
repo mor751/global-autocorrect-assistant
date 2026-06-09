@@ -1,9 +1,14 @@
 import argparse
 import json
+import os
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+
+# Windows blocks symlinks without admin/Developer Mode, which corrupts the HF cache; force file copies.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 try:
     from fastembed import TextEmbedding
@@ -17,12 +22,44 @@ except Exception as exc:
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 models = {}
 last_error = FASTEMBED_IMPORT_ERROR
+_supported_cache = None
+
+
+def supported_models():
+    global _supported_cache, last_error
+    if _supported_cache is not None:
+        return _supported_cache
+    if not FASTEMBED_IMPORT_OK:
+        return []
+    result = []
+    try:
+        for entry in TextEmbedding.list_supported_models():
+            if isinstance(entry, dict):
+                name = entry.get("model") or entry.get("model_name")
+                dim = entry.get("dim") or entry.get("dimension")
+            else:
+                name = getattr(entry, "model", None) or getattr(entry, "model_name", None)
+                dim = getattr(entry, "dim", None) or getattr(entry, "dimension", None)
+            if name:
+                result.append({"model": name, "dim": dim})
+        _supported_cache = result
+    except Exception as exc:
+        last_error = str(exc)
+    return result
+
+
+def supported_model_names():
+    return [m["model"] for m in supported_models()]
 
 
 def get_model(name):
     global last_error
     if not FASTEMBED_IMPORT_OK:
         last_error = f"fastembed import failed: {FASTEMBED_IMPORT_ERROR}"
+        raise RuntimeError(last_error)
+    names = supported_model_names()
+    if names and name not in names:
+        last_error = f"Model {name} is not supported in TextEmbedding. Supported models: {', '.join(names)}"
         raise RuntimeError(last_error)
     if name not in models:
         models[name] = TextEmbedding(model_name=name)
@@ -62,6 +99,7 @@ def state(model_name, load_model=False):
         "modelName": model_name,
         "dimension": dimension,
         "expectedDimension": 384,
+        "supportedModels": supported_model_names(),
         "lastError": last_error,
         "timestamp": time.time(),
     }
@@ -83,6 +121,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/model-info":
             self.send_json(state(model_name, load_model=True))
+            return
+        if parsed.path == "/supported-models":
+            self.send_json({"ok": True, "supportedModels": supported_models()})
             return
         self.send_json({"ok": False, "lastError": f"unknown endpoint: {parsed.path}"}, status=404)
 

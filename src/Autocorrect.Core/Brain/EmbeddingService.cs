@@ -30,12 +30,24 @@ public sealed class FastEmbedDiagnostics
     public DateTimeOffset LastHealthCheck { get; set; }
     public string LastError { get; set; } = string.Empty;
     public bool TestEmbeddingOk { get; set; }
+    public List<string> SupportedModels { get; set; } = new();
+
+    public bool ModelUnsupported =>
+        FastEmbedModelCatalog.IsOllamaOnly(ModelName) ||
+        (SupportedModels.Count > 0 && !SupportedModels.Contains(ModelName, StringComparer.OrdinalIgnoreCase)) ||
+        LastError.Contains("not supported", StringComparison.OrdinalIgnoreCase);
 
     public string Summary()
     {
-        if (SidecarRunning && FastEmbedImportOk && ModelLoaded && VectorDimension == 384 && TestEmbeddingOk)
+        if (SidecarRunning && FastEmbedImportOk && ModelLoaded && VectorDimension == FastEmbedModelCatalog.DefaultDimension && TestEmbeddingOk)
         {
             return $"FastEmbed ready: {ModelName}, dim {VectorDimension}, Python {PythonPath}";
+        }
+
+        if (ModelUnsupported)
+        {
+            var supported = SupportedModels.Count > 0 ? string.Join(", ", SupportedModels.Take(8)) : FastEmbedModelCatalog.DefaultModel;
+            return $"FastEmbed model '{ModelName}' is not supported. Use {FastEmbedModelCatalog.DefaultModel}. Supported: {supported}";
         }
 
         var error = string.IsNullOrWhiteSpace(LastError) ? "unknown reason" : LastError;
@@ -63,7 +75,7 @@ public sealed class FastEmbedEmbeddingService : IEmbeddingService
 
     public FastEmbedEmbeddingService(string modelName, int batchSize, string sidecarUrl, string pythonExecutable)
     {
-        _modelName = string.IsNullOrWhiteSpace(modelName) ? "BAAI/bge-small-en-v1.5" : modelName;
+        _modelName = FastEmbedModelCatalog.Coerce(modelName);
         _batchSize = Math.Clamp(batchSize, 1, 128);
         _sidecarUrl = string.IsNullOrWhiteSpace(sidecarUrl) ? "http://127.0.0.1:8765" : sidecarUrl.TrimEnd('/');
         _pythonExecutable = string.IsNullOrWhiteSpace(pythonExecutable) ? "python" : pythonExecutable;
@@ -307,6 +319,11 @@ public sealed class FastEmbedEmbeddingService : IEmbeddingService
         diagnostics.ModelName = ReadString(element, "modelName", diagnostics.ModelName);
         diagnostics.VectorDimension = ReadInt(element, "dimension");
         diagnostics.LastError = ReadString(element, "lastError", diagnostics.LastError);
+        var supported = ReadStringArray(element, "supportedModels");
+        if (supported.Count > 0)
+        {
+            diagnostics.SupportedModels = supported;
+        }
     }
 
     private static string? FindSidecarScript()
@@ -336,6 +353,22 @@ public sealed class FastEmbedEmbeddingService : IEmbeddingService
         return element.ValueKind == JsonValueKind.Object &&
                element.TryGetProperty(name, out var value) &&
                value.ValueKind == JsonValueKind.True;
+    }
+
+    private static List<string> ReadStringArray(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Object ||
+            !element.TryGetProperty(name, out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            return new List<string>();
+        }
+
+        return value.EnumerateArray()
+            .Where(item => item.ValueKind == JsonValueKind.String)
+            .Select(item => item.GetString() ?? string.Empty)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
     }
 
     private static int ReadInt(JsonElement element, string name)

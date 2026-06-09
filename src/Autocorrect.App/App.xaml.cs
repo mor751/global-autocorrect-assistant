@@ -627,7 +627,7 @@ public partial class App : Application
         var stats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
         if (!stats.IsAvailable)
         {
-            Notify($"Qdrant unavailable: {stats.Error}. Start Qdrant on {_settings.QdrantUrl}.");
+            Notify($"Qdrant unavailable at {_settings.QdrantUrl}: {stats.Error}. Start it: {QdrantVectorStore.StartCommand}");
             return;
         }
 
@@ -659,11 +659,11 @@ public partial class App : Application
     {
         return new ProjectBrainOptions
         {
-            Ollama = new OllamaSettings(settings.AiEndpoint, settings.AiModel, settings.EmbeddingModel),
+            Ollama = new OllamaSettings(settings.AiEndpoint, settings.AiModel, settings.OllamaEmbeddingModel),
             QdrantUrl = settings.QdrantUrl,
             VectorDbProvider = settings.VectorDbProvider,
             EmbeddingProvider = settings.EmbeddingProvider,
-            EmbeddingModel = settings.EmbeddingModel,
+            EmbeddingModel = FastEmbedModelCatalog.Coerce(settings.EmbeddingModel),
             FastEmbedSidecarUrl = settings.FastEmbedSidecarUrl,
             PythonExecutable = settings.PythonExecutable,
             EmbeddingBatchSize = settings.EmbeddingBatchSize,

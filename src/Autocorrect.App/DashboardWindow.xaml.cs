@@ -122,7 +122,7 @@ public partial class DashboardWindow : Window
         VectorDbStatusText.Foreground = BrushFor(_lastVectorStats.IsAvailable ? "ready" : "error");
         VectorFooterText.Text = _lastVectorStats.IsAvailable
             ? $"Collection: {_lastVectorStats.CollectionName} | vectors: {_lastVectorStats.VectorCount:N0}"
-            : $"Qdrant unavailable. Start it on {_settings.QdrantUrl}.";
+            : $"Qdrant unavailable at {_settings.QdrantUrl} ({Empty(_lastVectorStats.Error)}). Start it: {QdrantVectorStore.StartCommand}";
 
         var diagnostics = await _projectBrain.TestFastEmbedAsync(CancellationToken.None);
         ApplyFastEmbedDiagnostics(diagnostics);
@@ -227,11 +227,14 @@ public partial class DashboardWindow : Window
 
     private async Task TestQdrantAsync()
     {
-        DiagnosticsText.Text = "Testing Qdrant...";
+        DiagnosticsText.Text = $"Testing Qdrant at {_settings.QdrantUrl}...";
         _lastVectorStats = await _projectBrain.GetVectorStatsAsync(_settings.ProjectRoot, CancellationToken.None);
         DiagnosticsText.Text = _lastVectorStats.IsAvailable
-            ? $"Qdrant connected. Collection: {_lastVectorStats.CollectionName}. Vectors: {_lastVectorStats.VectorCount:N0}. Dimension: {_lastVectorStats.VectorDimension}."
-            : $"Qdrant unavailable: {_lastVectorStats.Error}. Start Qdrant local on {_settings.QdrantUrl}.";
+            ? $"Qdrant connected at {_settings.QdrantUrl}. Collection: {_lastVectorStats.CollectionName}. Vectors: {_lastVectorStats.VectorCount:N0}. Dimension: {_lastVectorStats.VectorDimension}."
+            : $"Qdrant URL: {_settings.QdrantUrl}\n" +
+              $"Status: unavailable\n" +
+              $"Error: {Empty(_lastVectorStats.Error)}\n\n" +
+              $"Start Qdrant locally:\n{QdrantVectorStore.StartCommand}";
         Refresh();
     }
 
@@ -358,6 +361,17 @@ public partial class DashboardWindow : Window
             $"Test embedding: {(diagnostics.TestEmbeddingOk ? "success" : "not tested/failed")}\n" +
             $"Last check: {diagnostics.LastHealthCheck.ToLocalTime():HH:mm:ss}\n" +
             $"Last error: {Empty(diagnostics.LastError)}";
+
+        if (diagnostics.ModelUnsupported)
+        {
+            var supported = diagnostics.SupportedModels.Count > 0
+                ? string.Join(", ", diagnostics.SupportedModels.Take(12))
+                : FastEmbedModelCatalog.DefaultModel;
+            DiagnosticsText.Text +=
+                $"\n\nFix: set the FastEmbed model to {FastEmbedModelCatalog.DefaultModel} (dim 384). " +
+                $"'nomic-embed-text' is an Ollama model and is not valid for FastEmbed.\n" +
+                $"Supported FastEmbed models: {supported}";
+        }
     }
 
     private void RenderFolderTree(ProjectBrainData brain)
@@ -432,7 +446,7 @@ public partial class DashboardWindow : Window
 
     private static string Trim(string text, int max) => text.Length <= max ? text : text[..max] + "...";
 
-    private static string Empty(string value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
+    private static string Empty(string? value) => string.IsNullOrWhiteSpace(value) ? "none" : value;
 
     private static string IconFor(string extension) => extension.ToLowerInvariant() switch
     {

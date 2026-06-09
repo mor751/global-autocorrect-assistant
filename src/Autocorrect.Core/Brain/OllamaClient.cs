@@ -6,7 +6,7 @@ namespace Autocorrect.Core.Brain;
 
 public sealed record OllamaSettings(string Endpoint, string ChatModel, string EmbeddingModel)
 {
-    public static OllamaSettings Default { get; } = new("http://localhost:11434", "gemma3:4b", "BAAI/bge-small-en-v1.5");
+    public static OllamaSettings Default { get; } = new("http://localhost:11434", "gemma3:4b", "nomic-embed-text");
 }
 
 public interface IOllamaClient

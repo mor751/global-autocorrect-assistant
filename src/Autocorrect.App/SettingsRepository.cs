@@ -145,9 +145,11 @@ public sealed class SettingsRepository
             : settings.IgnoredProjectFolders.ToHashSet(StringComparer.OrdinalIgnoreCase);
         settings.MaxIndexedFileSizeKb = Math.Clamp(settings.MaxIndexedFileSizeKb, 16, 2048);
         settings.MaxIndexedFiles = Math.Clamp(settings.MaxIndexedFiles, 50, 20000);
-        if (string.IsNullOrWhiteSpace(settings.EmbeddingModel))
+        settings.EmbeddingModel = Autocorrect.Core.Brain.FastEmbedModelCatalog.Coerce(settings.EmbeddingModel);
+
+        if (string.IsNullOrWhiteSpace(settings.OllamaEmbeddingModel))
         {
-            settings.EmbeddingModel = "BAAI/bge-small-en-v1.5";
+            settings.OllamaEmbeddingModel = "nomic-embed-text";
         }
 
         if (string.IsNullOrWhiteSpace(settings.VectorDbProvider))

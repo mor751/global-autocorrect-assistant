@@ -30,6 +30,8 @@ public interface IProjectVectorStore : IDisposable
 
 public sealed class QdrantVectorStore : IProjectVectorStore
 {
+    public const string StartCommand = "docker run -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant";
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
     private readonly bool _ownsClient;
