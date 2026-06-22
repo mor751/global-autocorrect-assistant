@@ -404,14 +404,22 @@ public sealed class ProjectAnalyzer : IProjectAnalyzer
 
 public sealed partial class ProjectChunker : IProjectChunker
 {
+    private readonly TreeSitterExtractor _treeSitter = new();
+
     public IReadOnlyList<ProjectChunk> Chunk(ProjectSourceFile source, ProjectFileSummary summary, int maxChunks)
     {
+        var treeRanges = TryTreeSitterRanges(source);
+        if (treeRanges.Count > 0)
+        {
+            return treeRanges.Take(maxChunks).Select((range, index) => BuildChunk(source, summary, range, index)).ToList();
+        }
+
         var ranges = summary.Language switch
         {
             "markdown" => MarkdownRanges(source.Content),
             "typescript" or "javascript" => SymbolRanges(source.Content, JsSymbolRegex(), "code_symbol"),
             "python" => SymbolRanges(source.Content, PythonSymbolRegex(), "python_symbol"),
-            "csharp" => SymbolRanges(source.Content, CsharpSymbolRegex(), "csharp_symbol"),
+            "csharp" => CsharpRanges(source.Content, source.RelativePath),
             "sql" => SymbolRanges(source.Content, SqlSymbolRegex(), "sql_block"),
             "json" => JsonRanges(source.Content),
             "css" => SymbolRanges(source.Content, CssSelectorRegex(), "style_block"),
@@ -424,6 +432,28 @@ public sealed partial class ProjectChunker : IProjectChunker
         }
 
         return ranges.Take(maxChunks).Select((range, index) => BuildChunk(source, summary, range, index)).ToList();
+    }
+
+    private List<ChunkRange> TryTreeSitterRanges(ProjectSourceFile source)
+    {
+        var extraction = _treeSitter.TryExtract(source.RelativePath, source.Content);
+        if (extraction is not null)
+        {
+            return _treeSitter.ToChunkRanges(extraction)
+                .Select(range => new ChunkRange(range.Kind, range.Symbol, range.StartLine, range.EndLine, range.Content, range.ParentSymbol))
+                .ToList();
+        }
+
+        if (source.Extension.Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            var ast = CsharpAstChunker.Extract(source.Content, source.RelativePath);
+            if (ast.Count > 0)
+            {
+                return ast.Select(range => new ChunkRange(range.Kind, range.Symbol, range.StartLine, range.EndLine, range.Content, range.ParentSymbol)).ToList();
+            }
+        }
+
+        return new List<ChunkRange>();
     }
 
     private static ProjectChunk BuildChunk(ProjectSourceFile source, ProjectFileSummary summary, ChunkRange range, int index)
@@ -443,7 +473,7 @@ public sealed partial class ProjectChunker : IProjectChunker
             Language = summary.Language,
             ChunkType = range.Kind,
             Symbol = range.Symbol,
-            ParentSymbol = string.Empty,
+            ParentSymbol = range.ParentSymbol,
             StartLine = range.StartLine,
             EndLine = range.EndLine,
             Content = content,
@@ -464,6 +494,17 @@ public sealed partial class ProjectChunker : IProjectChunker
         var tags = new List<string> { summary.Role.ToString().ToLowerInvariant(), summary.Language };
         if (!string.IsNullOrWhiteSpace(range.Symbol)) tags.Add(range.Symbol);
         return tags.Distinct(StringComparer.OrdinalIgnoreCase).Take(16).ToList();
+    }
+
+    private static List<ChunkRange> CsharpRanges(string content, string relativePath)
+    {
+        var ast = CsharpAstChunker.Extract(content, relativePath);
+        if (ast.Count > 0)
+        {
+            return ast.Select(range => new ChunkRange(range.Kind, range.Symbol, range.StartLine, range.EndLine, range.Content, range.ParentSymbol)).ToList();
+        }
+
+        return SymbolRanges(content, CsharpSymbolRegex(), "csharp_symbol");
     }
 
     private static List<ChunkRange> MarkdownRanges(string content)
@@ -587,7 +628,7 @@ public sealed partial class ProjectChunker : IProjectChunker
         return new Guid(hash.AsSpan(0, 16)).ToString();
     }
 
-    private sealed record ChunkRange(string Kind, string Symbol, int StartLine, int EndLine, string Content);
+    private sealed record ChunkRange(string Kind, string Symbol, int StartLine, int EndLine, string Content, string ParentSymbol = "");
 
     [GeneratedRegex(@"(?m)^\s*(?:export\s+)?(?:async\s+)?(?:function|class|interface|type|enum)\s+([A-Za-z_][A-Za-z0-9_]*)|^\s*(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=", RegexOptions.Compiled)]
     private static partial Regex JsSymbolRegex();

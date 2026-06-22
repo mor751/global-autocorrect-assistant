@@ -46,6 +46,18 @@ public sealed class ProjectIndexer : IProjectIndexer
     {
         var files = _scanner.Scan(projectRoot, options, out var skipped);
         var brain = _analyzer.Analyze(projectRoot, files, options);
+        var extractor = new TreeSitterExtractor();
+        var extractions = new List<GraphExtractionResult>();
+        foreach (var source in files)
+        {
+            var extraction = extractor.TryExtract(source.RelativePath, source.Content);
+            if (extraction is not null)
+            {
+                extractions.Add(extraction);
+            }
+        }
+
+        GraphExtractionMerger.Apply(brain, extractions);
         var summariesByPath = brain.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
         var chunks = new List<ProjectChunk>();
         var notEmbedded = new List<SkippedFile>();

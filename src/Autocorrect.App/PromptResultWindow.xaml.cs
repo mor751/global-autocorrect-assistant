@@ -41,6 +41,22 @@ public partial class PromptResultWindow : Window
         RiskValue.Text = analysis.RiskLevel.ToString();
         RiskValue.Foreground = RiskBrush(analysis.RiskLevel);
         TaskTypeValue.Text = analysis.TaskType.ToString();
+        AccuracyValue.Text = Percent(result.Confidence);
+        TokensSavedValue.Text = $"~{_outcome.DownstreamTokenSavingsEstimate:N0}";
+
+        var folder = string.IsNullOrWhiteSpace(_outcome.ProjectRoot)
+            ? "No project folder (generic optimization)"
+            : _outcome.ProjectRoot;
+        ProjectFolderText.Text = string.IsNullOrWhiteSpace(_outcome.ProjectName)
+            ? folder
+            : $"{_outcome.ProjectName}  ·  {folder}";
+        var agentLabel = AgentModelAdvisor.AgentLabel(_outcome.TargetAgent);
+        var detection = string.IsNullOrWhiteSpace(_outcome.ResolutionSource) ? "manual/settings" : _outcome.ResolutionSource;
+        BrainMetaText.Text =
+            $"{agentLabel} · use {_outcome.RecommendedModels}  ·  " +
+            $"{_outcome.RetrievalMode}  ·  {_outcome.VectorCount:N0} vectors  ·  " +
+            $"detected via {detection}  ·  " +
+            $"prompt {_outcome.OriginalTokenEstimate}→{_outcome.ImprovedTokenEstimate} tokens";
 
         OriginalBox.Text = _outcome.OriginalPrompt;
         ImprovedBox.Text = result.Kind == EnhancementKind.ShorterPrompt ? result.ShorterPrompt : result.ImprovedPrompt;
@@ -48,10 +64,11 @@ public partial class PromptResultWindow : Window
         MissingList.ItemsSource = result.MissingContext.Count > 0 ? result.MissingContext : new List<string> { "Nothing critical missing" };
 
         var sign = result.EstimatedPromptTokenChange >= 0 ? "+" : string.Empty;
-        EffectText.Text = $"Estimated prompt tokens: {sign}{result.EstimatedPromptTokenChange}  ·  " +
-                          $"~{result.EstimatedReducedRetries:0.0} fewer retries  ·  " +
-                          $"confidence {Percent(result.Confidence)}  ·  " +
-                          $"Ollama: {(_outcome.OllamaAvailable ? "on" : "fallback")}";
+        EffectText.Text =
+            $"Prompt tokens: {sign}{result.EstimatedPromptTokenChange}  ·  " +
+            $"~{_outcome.DownstreamTokenSavingsEstimate:N0} downstream tokens saved on {agentLabel}  ·  " +
+            $"~{result.EstimatedReducedRetries:0.0} fewer retries  ·  " +
+            $"Writer: {(_outcome.OllamaAvailable ? "gemma3:4b" : "deterministic fallback")}";
 
         ReindexButton.IsEnabled = _outcome.ProjectIndexed || !string.IsNullOrEmpty(_outcome.Brain?.ProjectRoot);
         OpenBrainButton.IsEnabled = _outcome.Brain is not null;

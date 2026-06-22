@@ -21,6 +21,16 @@ public sealed class EnhancementOutcome
     public bool ProjectIndexed { get; set; }
     public bool OllamaAvailable { get; set; }
     public List<string> UsedFiles { get; set; } = new();
+    public string ProjectRoot { get; set; } = string.Empty;
+    public string ProjectName { get; set; } = string.Empty;
+    public PromptTargetAgent TargetAgent { get; set; } = PromptTargetAgent.Codex;
+    public string ResolutionSource { get; set; } = string.Empty;
+    public RetrievalMode RetrievalMode { get; set; } = RetrievalMode.NoBrain;
+    public int OriginalTokenEstimate { get; set; }
+    public int ImprovedTokenEstimate { get; set; }
+    public int DownstreamTokenSavingsEstimate { get; set; }
+    public string RecommendedModels { get; set; } = string.Empty;
+    public long VectorCount { get; set; }
 }
 
 public sealed class ProjectBrainOptions
@@ -66,8 +76,56 @@ public sealed class ProjectBrainService : IDisposable
         old.Dispose();
     }
 
-    public bool IsIndexed(string? projectRoot) =>
-        !string.IsNullOrWhiteSpace(projectRoot) && File.Exists(BrainPath(projectRoot!));
+    public bool IsIndexed(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return false;
+        }
+
+        var root = NormalizeProjectRoot(projectRoot);
+        if (File.Exists(BrainPath(root)))
+        {
+            return true;
+        }
+
+        var metadata = LoadIndexMetadata(root);
+        return metadata is not null && metadata.IndexedFiles > 0;
+    }
+
+    public static string NormalizeProjectRoot(string projectRoot) =>
+        Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    public IReadOnlyList<string> ListIndexedProjects()
+    {
+        var directory = BrainStorage.BrainDirectory(_baseDirectory);
+        if (!Directory.Exists(directory))
+        {
+            return Array.Empty<string>();
+        }
+
+        var roots = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(directory, "brain-*.json"))
+        {
+            try
+            {
+                var brain = JsonSerializer.Deserialize<ProjectBrainData>(File.ReadAllText(file), BrainJson.Options);
+                if (!string.IsNullOrWhiteSpace(brain?.ProjectRoot))
+                {
+                    roots.Add(brain.ProjectRoot);
+                }
+            }
+            catch
+            {
+                // Ignore corrupt brain files when listing projects.
+            }
+        }
+
+        return roots
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     public async Task<ProjectBrainData> IndexAsync(string projectRoot, CancellationToken cancellationToken)
     {
@@ -113,6 +171,8 @@ public sealed class ProjectBrainService : IDisposable
             SaveIndexMetadata(metadata);
             return brain;
         }
+
+        await store.UpsertSymbolGraphAsync(metadata.Collection, brain.Graph, cancellationToken);
 
         var previousFiles = previous?.FileHashes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var previousChunks = previous?.ChunkHashes ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -173,7 +233,11 @@ public sealed class ProjectBrainService : IDisposable
         }
     }
 
-    public async Task<EnhancementOutcome> EnhanceAsync(string originalPrompt, string? projectRoot, CancellationToken cancellationToken)
+    public async Task<EnhancementOutcome> EnhanceAsync(
+        string originalPrompt,
+        string? projectRoot,
+        CancellationToken cancellationToken,
+        PromptTargetAgent targetAgent = PromptTargetAgent.Codex)
     {
         var brain = LoadBrain(projectRoot);
         var ollamaAvailable = await _ollama.IsAvailableAsync(cancellationToken);
@@ -189,7 +253,7 @@ public sealed class ProjectBrainService : IDisposable
         var compiled = await compiler.CompileAsync(new PromptCompilerRequest
         {
             OriginalPrompt = originalPrompt,
-            TargetAgent = PromptTargetAgent.Codex,
+            TargetAgent = targetAgent,
             Brain = brain,
             Retrieval = retrieval,
             MissingContext = analysis.MissingContext
@@ -205,8 +269,25 @@ public sealed class ProjectBrainService : IDisposable
             ProjectIndexed = brain is not null,
             OllamaAvailable = ollamaAvailable,
             UsedFiles = compiled.RelevantFiles.Count > 0 ? compiled.RelevantFiles : retrieved.Select(r => r.File.Path).ToList(),
-            Status = DetermineStatus(brain is not null, ollamaAvailable, result.Kind)
+            Status = DetermineStatus(brain is not null, ollamaAvailable, result.Kind),
+            ProjectRoot = projectRoot ?? string.Empty,
+            ProjectName = string.IsNullOrWhiteSpace(projectRoot) ? string.Empty : Path.GetFileName(projectRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+            TargetAgent = targetAgent,
+            RetrievalMode = retrieval.RetrievalMode,
+            OriginalTokenEstimate = EstimateTokens(originalPrompt),
+            ImprovedTokenEstimate = EstimateTokens(result.ImprovedPrompt),
+            RecommendedModels = AgentModelAdvisor.Recommend(targetAgent)
         };
+        outcome.DownstreamTokenSavingsEstimate = AgentModelAdvisor.EstimateDownstreamTokenSavings(
+            originalPrompt,
+            result.ImprovedPrompt,
+            outcome.UsedFiles.Count);
+
+        if (!string.IsNullOrWhiteSpace(projectRoot))
+        {
+            var stats = await GetVectorStatsAsync(projectRoot, cancellationToken);
+            outcome.VectorCount = stats.VectorCount;
+        }
 
         _history.Record(new PromptHistoryEntry
         {
@@ -363,6 +444,45 @@ public sealed class ProjectBrainService : IDisposable
             ? BrainStorage.CollectionName(projectRoot)
             : metadata!.Collection;
 
+    public async Task<BrainDoctorReport> DoctorAsync(string? projectRoot, CancellationToken cancellationToken)
+    {
+        var root = string.IsNullOrWhiteSpace(projectRoot) ? string.Empty : Path.GetFullPath(projectRoot);
+        var metadata = LoadIndexMetadata(root);
+        var embedding = await TestEmbeddingAsync(cancellationToken);
+        var ollamaAvailable = await _ollama.IsAvailableAsync(cancellationToken);
+        var stats = await GetVectorStatsAsync(string.IsNullOrWhiteSpace(root) ? null : root, cancellationToken);
+        var graphStats = (0, 0);
+        if (!string.IsNullOrWhiteSpace(root) && stats.IsAvailable)
+        {
+            using var store = CreateVectorStore();
+            graphStats = await store.GetSymbolGraphStatsAsync(ResolveCollection(root, metadata), cancellationToken);
+        }
+
+        return new BrainDoctorReport
+        {
+            ProjectRoot = root,
+            ProjectIndexed = !string.IsNullOrWhiteSpace(root) && IsIndexed(root),
+            Status = metadata?.Status ?? ProjectBrainStatus.NoFolder,
+            RagMode = metadata?.CurrentRagMode() ?? "No brain",
+            OllamaAvailable = ollamaAvailable,
+            OllamaModel = _options.Ollama.ChatModel,
+            EmbedderReady = embedding.Available,
+            EmbedderDimension = embedding.VectorDimension,
+            EmbedderDownloaded = embedding.ModelDownloaded,
+            EmbedderError = string.IsNullOrWhiteSpace(embedding.LastError) ? null : embedding.LastError,
+            VectorStoreReady = stats.IsAvailable,
+            VectorCount = stats.VectorCount,
+            Collection = stats.CollectionName,
+            SymbolNodes = graphStats.Item1,
+            SymbolEdges = graphStats.Item2,
+            IndexedFiles = metadata?.IndexedFiles ?? 0,
+            TotalChunks = metadata?.TotalChunks ?? 0,
+            EmbeddedChunks = metadata?.EmbeddedChunks ?? 0,
+            SkippedFiles = metadata?.SkippedFiles ?? 0,
+            LastError = metadata?.LastError ?? stats.Error
+        };
+    }
+
     public async Task<EmbeddingDiagnostics> TestEmbeddingAsync(CancellationToken cancellationToken)
     {
         using var local = new LocalOnnxEmbeddingService(_baseDirectory);
@@ -432,7 +552,7 @@ public sealed class ProjectBrainService : IDisposable
     }
 
     private string BrainPath(string projectRoot) =>
-        Path.Combine(BrainStorage.BrainDirectory(_baseDirectory), $"brain-{BrainStorage.ProjectKey(projectRoot)}.json");
+        Path.Combine(BrainStorage.BrainDirectory(_baseDirectory), $"brain-{BrainStorage.ProjectKey(NormalizeProjectRoot(projectRoot))}.json");
 
     public string? SkippedReportPath(string? projectRoot)
     {
@@ -491,6 +611,9 @@ public sealed class ProjectBrainService : IDisposable
     }
 
     public PromptHistoryStore History => _history;
+
+    private static int EstimateTokens(string text) =>
+        string.IsNullOrWhiteSpace(text) ? 0 : Math.Max(1, (int)Math.Round(text.Length / 4.0));
 
     public void Dispose() => _ollama.Dispose();
 }

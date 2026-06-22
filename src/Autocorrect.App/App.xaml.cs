@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Forms;
@@ -44,6 +45,11 @@ public partial class App : Application
         _settingsRepository = new SettingsRepository();
         _settings = _settingsRepository.Load();
         EnsureDefaultPetAppearance(_settings, _settingsRepository);
+        var activeRoot = ActiveProjectStore.Get(_settings);
+        if (!string.IsNullOrWhiteSpace(activeRoot))
+        {
+            _settings.ProjectRoot = activeRoot;
+        }
         _projectBrainStatus = string.IsNullOrWhiteSpace(_settings.ProjectRoot) ? "no_folder" : "folder_selected";
         _runtimeStatus = new RuntimeStatusStore();
         _aiRewriteService = new CompositeAiRewriteService();
@@ -368,7 +374,10 @@ public partial class App : Application
                 ShowVectorStoreStatus,
                 () => OpenProjectBrain(),
                 SetPetImage,
-                ReapplyBrainSettings);
+                ReapplyBrainSettings,
+                SetActiveProjectFolder,
+                IndexProjectAtAsync,
+                LaunchBrainWeb);
             _dashboardWindow.Closing += (_, args) =>
             {
                 if (_isExiting)
@@ -486,7 +495,7 @@ public partial class App : Application
         Notify($"Done. ~{result.EstimatedTokenReductionPercent}% fewer tokens.");
     }
 
-    // Project-aware flow: capture prompt, retrieve project context, analyze, rewrite, and show the overlay.
+    // Project-aware flow: detect IDE workspace, retrieve brain context, rewrite, paste back into the editor.
     private async void RunProjectAwareEnhance(nint targetWindow)
     {
         if (_settings is null || _projectBrain is null)
@@ -514,20 +523,62 @@ public partial class App : Application
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_settings.ProjectRoot))
+        var ide = ActiveIdeResolver.Resolve(
+            context.ProcessName,
+            context.WindowTitle,
+            _settings.ProjectRoot,
+            _projectBrain.ListIndexedProjects());
+
+        var projectRoot = ide.WorkspaceRoot;
+        if (string.IsNullOrWhiteSpace(projectRoot))
         {
-            Notify("No project folder selected. Prompt optimized without project context.");
+            if (ActiveIdeResolver.IsIdeProcess(context.ProcessName))
+            {
+                Notify("Could not detect the Cursor/Codex workspace folder. Focus the IDE window and try again.");
+                return;
+            }
+
+            projectRoot = _settings.ProjectRoot;
         }
-        else if (_projectBrainStatus != "ready")
+
+        if (string.IsNullOrWhiteSpace(projectRoot))
         {
-            Notify("Project brain is not ready yet. Prompt optimized with available context.");
+            Notify("No project folder. Woody will optimize without project context.");
+        }
+        else
+        {
+            SetActiveProjectFolder(projectRoot);
+            _projectBrainStatus = _projectBrain.IsIndexed(projectRoot)
+                ? StatusText(_projectBrain.LoadIndexMetadata(projectRoot)?.Status ?? ProjectBrainStatus.Ready)
+                : _projectBrainStatus;
+            Notify($"Using brain: {Path.GetFileName(projectRoot)} ({ide.Agent}, {ide.ResolutionSource})");
+        }
+
+        if (!string.IsNullOrWhiteSpace(projectRoot) && !_projectBrain.IsIndexed(projectRoot))
+        {
+            Notify($"Building brain for {Path.GetFileName(projectRoot)}...");
+            try
+            {
+                await _projectBrain.IndexAsync(projectRoot, CancellationToken.None);
+                _projectBrainStatus = "ready";
+            }
+            catch (Exception ex)
+            {
+                _runtimeStatus?.RecordError(ex);
+                Notify("Index failed. Using generic prompt optimization.");
+                projectRoot = null;
+            }
         }
 
         _aiPetWindow?.SetThinking(true);
         EnhancementOutcome outcome;
         try
         {
-            outcome = await _projectBrain.EnhanceAsync(selected, _settings.ProjectRoot, CancellationToken.None);
+            outcome = await _projectBrain.EnhanceAsync(
+                selected,
+                projectRoot,
+                CancellationToken.None,
+                ide.TargetAgent);
         }
         catch (Exception ex)
         {
@@ -540,6 +591,7 @@ public partial class App : Application
             _aiPetWindow?.SetThinking(false);
         }
 
+        outcome.ResolutionSource = ide.ResolutionSource;
         ShowPromptResult(outcome, targetWindow, selected);
     }
 
@@ -573,11 +625,82 @@ public partial class App : Application
             return;
         }
 
-        _settings.ProjectRoot = dialog.SelectedPath;
-        _projectBrainStatus = "folder_selected";
-        _projectBrainLastError = null;
-        _settingsRepository.Save(_settings);
+        SetActiveProjectFolder(dialog.SelectedPath);
         await ReindexCurrentProjectAsync();
+    }
+
+    private void SetActiveProjectFolder(string projectRoot)
+    {
+        if (_settings is null || _settingsRepository is null || string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return;
+        }
+
+        ActiveProjectStore.Set(projectRoot, _settings, _settingsRepository.Save);
+        _projectBrainStatus = _projectBrain?.IsIndexed(_settings.ProjectRoot) == true
+            ? StatusText(_projectBrain.LoadIndexMetadata(_settings.ProjectRoot)?.Status ?? ProjectBrainStatus.Ready)
+            : "folder_selected";
+        _projectBrainLastError = null;
+        _dashboardWindow?.Refresh();
+    }
+
+    private async Task IndexProjectAtAsync(string projectRoot)
+    {
+        if (_projectBrain is null || string.IsNullOrWhiteSpace(projectRoot))
+        {
+            return;
+        }
+
+        SetActiveProjectFolder(projectRoot);
+        _aiPetWindow?.SetThinking(true);
+        _projectBrainStatus = "indexing";
+        _projectBrainLastError = null;
+        _dashboardWindow?.Refresh();
+        try
+        {
+            var brain = await _projectBrain.IndexAsync(projectRoot, CancellationToken.None);
+            var metadata = _projectBrain.LoadIndexMetadata(projectRoot);
+            _projectBrainStatus = StatusText(metadata?.Status ?? ProjectBrainStatus.Ready);
+            _projectBrainLastError = metadata?.LastError;
+            Notify($"Indexed {brain.Files.Count} files in {brain.ProjectName}.");
+        }
+        catch (Exception ex)
+        {
+            _projectBrainStatus = "error";
+            _projectBrainLastError = ex.Message;
+            _runtimeStatus?.RecordError(ex);
+            Notify("Indexing failed.");
+        }
+        finally
+        {
+            _aiPetWindow?.SetThinking(false);
+            _dashboardWindow?.Refresh();
+            _ragWindow?.Refresh();
+        }
+    }
+
+    private void LaunchBrainWeb(string projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot))
+        {
+            Notify("Select a project folder first.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "woody",
+                Arguments = $"brain open --path \"{projectRoot}\"",
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            _runtimeStatus?.RecordError(ex);
+            Notify("Could not launch woody brain. Ensure woody is on PATH.");
+        }
     }
 
     // Rebuilds the Project Brain index and vector store for the configured project root.
@@ -667,21 +790,8 @@ public partial class App : Application
         _projectBrain.Reconfigure(BuildBrainOptions(_settings));
     }
 
-    private static ProjectBrainOptions BuildBrainOptions(CorrectionSettings settings)
-    {
-        return new ProjectBrainOptions
-        {
-            Ollama = new OllamaSettings(settings.AiEndpoint, settings.AiModel, settings.OllamaEmbeddingModel),
-            RetrievalTopK = settings.RetrievalTopK,
-            Index = new IndexOptions
-            {
-                MaxFileSizeBytes = settings.MaxIndexedFileSizeKb * 1024,
-                MaxFiles = settings.MaxIndexedFiles,
-                MaxInitialChunks = settings.MaxInitialChunks,
-                IgnoredFolders = settings.IgnoredProjectFolders.ToHashSet(StringComparer.OrdinalIgnoreCase)
-            }
-        };
-    }
+    private static ProjectBrainOptions BuildBrainOptions(CorrectionSettings settings) =>
+        BrainOptionsFactory.FromSettings(settings);
 
     private static string StatusText(ProjectBrainStatus status) => status switch
     {

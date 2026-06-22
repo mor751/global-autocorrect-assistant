@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Woody Second Brain</title>
+  <link rel="stylesheet" href="brain.css" />
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+</head>
+<body>
+  <div class="bg-glow"></div>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🧠</div>
+        <div>
+          <h1>Woody Second Brain</h1>
+          <p id="subtitle">Vector + AST symbol graph</p>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-view="vectors">Neural Map</button>
+        <button class="tab" data-view="graph">AST Graph</button>
+      </div>
+      <div class="top-actions">
+        <button id="reloadBtn" class="ghost">Reload</button>
+        <button id="resetBtn" class="ghost">Reset view</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Project</h2>
+          <div id="statusCard" class="status-card loading">Loading brain…</div>
+        </section>
+
+        <section class="panel">
+          <h2>Search brain</h2>
+          <form id="searchForm" class="search-form">
+            <input id="searchInput" type="search" placeholder="Ask the brain…" autocomplete="off" />
+            <button type="submit">Search</button>
+          </form>
+          <div id="searchResults" class="search-results"></div>
+        </section>
+
+        <section class="panel" id="legendPanel">
+          <h2>Legend</h2>
+          <ul id="legendList" class="legend-list"></ul>
+        </section>
+
+        <section class="panel">
+          <h2>Selection</h2>
+          <div id="selectionCard" class="selection-card">
+            <p class="muted">Click a node to inspect code context.</p>
+          </div>
+        </section>
+      </aside>
+
+      <section class="canvas-wrap">
+        <div id="loadingOverlay" class="loading-overlay">
+          <div class="pulse-ring"></div>
+          <p>Projecting embeddings…</p>
+        </div>
+        <canvas id="vectorCanvas" class="view-layer active"></canvas>
+        <svg id="graphSvg" class="view-layer"></svg>
+        <div class="hud">
+          <span id="hudStats"></span>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="brain.js"></script>
+</body>
+</html>

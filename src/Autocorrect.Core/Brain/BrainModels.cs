@@ -118,8 +118,9 @@ public sealed class ProjectChunk
     public string EmbeddedText()
     {
         var symbol = string.IsNullOrWhiteSpace(Symbol) ? "none" : Symbol;
+        var parent = string.IsNullOrWhiteSpace(ParentSymbol) ? "none" : ParentSymbol;
         var imports = Imports.Count == 0 ? "none" : string.Join(", ", Imports.Take(12));
-        return $"File: {FilePath}\nLanguage: {Language}\nType: {ChunkType}\nSymbol: {symbol}\nImports: {imports}\n\nCode/Text:\n{Content}";
+        return $"File: {FilePath}\nLanguage: {Language}\nType: {ChunkType}\nSymbol: {symbol}\nParent: {parent}\nImports: {imports}\n\nCode/Text:\n{Content}";
     }
 }
 

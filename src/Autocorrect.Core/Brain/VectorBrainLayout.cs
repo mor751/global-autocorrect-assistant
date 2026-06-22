@@ -1,6 +1,4 @@
-using Autocorrect.Core.Brain;
-
-namespace Autocorrect.App;
+namespace Autocorrect.Core.Brain;
 
 public sealed class VectorLayoutResult
 {

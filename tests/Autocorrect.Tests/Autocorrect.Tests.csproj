@@ -7,5 +7,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Autocorrect.Core\Autocorrect.Core.csproj" />
+    <PackageReference Include="TreeSitter.DotNet" Version="1.3.0" />
   </ItemGroup>
 </Project>

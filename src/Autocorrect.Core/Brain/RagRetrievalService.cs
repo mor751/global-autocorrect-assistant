@@ -33,15 +33,49 @@ public sealed class RagRetrievalService
 
         var cleaned = CleanQuery(query);
         var collection = _metadata?.Collection ?? BrainStorage.CollectionName(projectRoot);
+        var parsed = PromptSymbolParser.Parse(cleaned);
+        var symbolTargets = SymbolTargetResolver.Resolve(parsed, brain);
+
         if (_metadata?.Status is ProjectBrainStatus.Ready or ProjectBrainStatus.PartialReady)
         {
+            var symbolHits = new List<RetrievalResult>();
+            if (parsed.Symbols.Count > 0)
+            {
+                symbolHits.AddRange(await _vectorStore.SearchBySymbolsAsync(collection, parsed.Symbols, 3, cancellationToken));
+            }
+
+            if (symbolTargets.Count > 0)
+            {
+                var targetFiles = symbolTargets.Select(target => target.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                symbolHits.AddRange(await _vectorStore.GetChunksByFilesAsync(collection, targetFiles, 2, cancellationToken));
+                foreach (var hit in symbolHits.Where(hit => hit.Score <= 0))
+                {
+                    hit.Score = 0.96;
+                    hit.Reason = "prompt symbol target";
+                }
+            }
+
             var queryVector = await _embeddings.EmbedTextAsync($"query: {cleaned}", cancellationToken);
             if (queryVector is { Length: > 0 })
             {
                 var semantic = await _vectorStore.SearchAsync(collection, queryVector, Math.Max(topK * 2, topK), cancellationToken);
-                var boosted = BoostAndDedupe(cleaned, semantic, topK);
+                var merged = symbolHits
+                    .Concat(semantic)
+                    .ToList();
+                var boosted = BoostAndDedupe(cleaned, merged, topK * 2);
                 if (boosted.Count > 0)
                 {
+                    var neighborPaths = GraphRetriever.NeighborFilePaths(brain, boosted);
+                    if (neighborPaths.Count > 0)
+                    {
+                        var neighborChunks = await _vectorStore.GetChunksByFilesAsync(collection, neighborPaths, 2, cancellationToken);
+                        boosted = GraphRetriever.MergeGraphNeighbors(boosted, neighborChunks, topK);
+                    }
+                    else
+                    {
+                        boosted = boosted.Take(topK).ToList();
+                    }
+
                     return new RetrievalResponse
                     {
                         Query = cleaned,

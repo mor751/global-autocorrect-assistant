@@ -12,6 +12,12 @@ var tests = new (string Name, Action Run)[]
     ("markdown chunker splits by headings", MarkdownChunkerSplitsByHeadings),
     ("prompt compiler fallback does not invent files", PromptCompilerFallbackDoesNotInventFiles),
     ("sqlite vector store round-trips and ranks by cosine", SqliteVectorStoreRoundTripsAndRanks),
+    ("csharp ast chunker extracts class and method", CsharpAstChunkerExtractsSymbols),
+    ("graph retriever finds import neighbors", GraphRetrieverFindsImportNeighbors),
+    ("symbol graph persists in sqlite", SymbolGraphPersistsInSqlite),
+    ("tree-sitter extracts typescript symbols", TreeSitterExtractsTypescriptSymbols),
+    ("prompt symbol parser finds qualified names", PromptSymbolParserFindsQualifiedNames),
+    ("prompt symbol resolver maps to graph nodes", PromptSymbolResolverMapsToGraphNodes),
     ("wordpiece tokenizer wraps with cls and sep", WordPieceTokenizerWrapsWithClsAndSep),
     ("brain retrieval finds login file for animation prompt", BrainRetrievalFindsLoginFile),
     ("prompt analyzer flags vague prompt", PromptAnalyzerFlagsVaguePrompt),
@@ -34,7 +40,9 @@ var tests = new (string Name, Action Run)[]
     ("correct words are left alone", CorrectWordsAreLeftAlone),
     ("ignored words are left alone", IgnoredWordsAreLeftAlone),
     ("replacement preserves title casing", ReplacementPreservesTitleCasing),
-    ("engine stays fast after warmup", EngineStaysFastAfterWarmup)
+    ("engine stays fast after warmup", EngineStaysFastAfterWarmup),
+    ("active ide resolver parses cursor title", ActiveIdeResolverParsesCursorTitle),
+    ("active ide resolver ignores settings in ide mode", ActiveIdeResolverIgnoresSettingsFallbackInIde)
 };
 
 var failures = 0;
@@ -456,6 +464,105 @@ static void SqliteVectorStoreRoundTripsAndRanks()
     }
 }
 
+static void CsharpAstChunkerExtractsSymbols()
+{
+    const string code = """
+        namespace Demo;
+
+        public class LoginService
+        {
+            public bool Validate(string user)
+            {
+                return !string.IsNullOrWhiteSpace(user);
+            }
+        }
+        """;
+
+    var ranges = CsharpAstChunker.Extract(code, "LoginService.cs");
+    Assert.True(ranges.Any(range => range.Symbol == "LoginService"), "Expected LoginService class.");
+    Assert.True(ranges.Any(range => range.Symbol == "Validate"), "Expected Validate method.");
+}
+
+static void GraphRetrieverFindsImportNeighbors()
+{
+    var brain = new ProjectBrainData();
+    brain.Graph.AddNode("file:src/a.ts", NodeType.File, "a.ts", "src/a.ts");
+    brain.Graph.AddNode("file:src/b.ts", NodeType.File, "b.ts", "src/b.ts");
+    brain.Graph.AddEdge("file:src/a.ts", "file:src/b.ts", EdgeType.Imports);
+
+    var seeds = new List<RetrievalResult>
+    {
+        new() { FilePath = "src/a.ts", Score = 0.9 }
+    };
+
+    var neighbors = GraphRetriever.NeighborFilePaths(brain, seeds);
+    Assert.True(neighbors.Contains("src/b.ts"), "Expected imported neighbor file.");
+}
+
+static void SymbolGraphPersistsInSqlite()
+{
+    var baseDir = Path.Combine(Path.GetTempPath(), "woody_graph_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(baseDir);
+    try
+    {
+        using var store = new SqliteVectorStore(baseDir);
+        const string collection = "woody_project_graph";
+        store.EnsureCollectionAsync(collection, 3, CancellationToken.None).GetAwaiter().GetResult();
+
+        var graph = new ProjectGraph();
+        graph.AddNode("file:src/a.cs", NodeType.File, "a.cs", "src/a.cs");
+        graph.AddNode("file:src/b.cs", NodeType.File, "b.cs", "src/b.cs");
+        graph.AddEdge("file:src/a.cs", "file:src/b.cs", EdgeType.Imports);
+        store.UpsertSymbolGraphAsync(collection, graph, CancellationToken.None).GetAwaiter().GetResult();
+
+        var stats = store.GetSymbolGraphStatsAsync(collection, CancellationToken.None).GetAwaiter().GetResult();
+        Assert.Equal(2, stats.Nodes);
+        Assert.Equal(1, stats.Edges);
+    }
+    finally
+    {
+        try { Directory.Delete(baseDir, true); } catch { }
+    }
+}
+
+static void TreeSitterExtractsTypescriptSymbols()
+{
+    const string code = """
+        class LoginForm {
+          refresh() {
+            return true;
+          }
+        }
+        """;
+
+    var extraction = new TreeSitterExtractor().TryExtract("src/LoginForm.js", code);
+    Assert.NotNull(extraction);
+    Assert.True(extraction!.Nodes.Any(node => node.Label == "LoginForm"), "Expected LoginForm class node.");
+}
+
+static void PromptSymbolParserFindsQualifiedNames()
+{
+    var parsed = PromptSymbolParser.Parse("fix DashboardWindow.RefreshAsync vector db in src/app/page.tsx");
+    Assert.True(parsed.TypeNames.Contains("DashboardWindow"), "Expected DashboardWindow type.");
+    Assert.True(parsed.MethodNames.Contains("RefreshAsync"), "Expected RefreshAsync method.");
+    Assert.True(parsed.FilePaths.Any(path => path.Contains("page.tsx", StringComparison.OrdinalIgnoreCase)), "Expected file path.");
+}
+
+static void PromptSymbolResolverMapsToGraphNodes()
+{
+    var brain = new ProjectBrainData();
+    brain.Files.Add(new ProjectFileSummary
+    {
+        Path = "src/DashboardWindow.xaml.cs",
+        Symbols = new List<string> { "DashboardWindow", "RefreshAsync" }
+    });
+    brain.Graph.AddNode("sym:src/DashboardWindow.xaml.cs:RefreshAsync", NodeType.Function, "RefreshAsync", "src/DashboardWindow.xaml.cs");
+
+    var parsed = PromptSymbolParser.Parse("fix DashboardWindow.RefreshAsync");
+    var targets = SymbolTargetResolver.Resolve(parsed, brain);
+    Assert.True(targets.Any(target => target.Symbol == "RefreshAsync"), "Expected RefreshAsync target.");
+}
+
 static void WordPieceTokenizerWrapsWithClsAndSep()
 {
     var vocabPath = Path.Combine(Path.GetTempPath(), "woody_vocab_" + Guid.NewGuid().ToString("N") + ".txt");
@@ -520,6 +627,32 @@ static void SecretScannerRedactsKeys()
 {
     Assert.True(SecretScanner.Redact("API_KEY=sk-1234567890abcdef").Contains("[REDACTED]", StringComparison.Ordinal), "API key should be redacted.");
     Assert.True(SecretScanner.Redact("postgres://user:pass@host:5432/db").Contains("[REDACTED]", StringComparison.Ordinal), "Database URL should be redacted.");
+}
+
+static void ActiveIdeResolverParsesCursorTitle()
+{
+    var indexed = new[] { @"C:\Users\Admin\Documents\New project 5", @"C:\Users\Admin\New folder (2)" };
+    var session = ActiveIdeResolver.Resolve(
+        "Cursor",
+        "App.xaml.cs - New project 5 - Cursor",
+        @"C:\Users\Admin\Documents\New project 5",
+        indexed);
+
+    Assert.Equal(CodingAgentKind.Cursor, session.Agent);
+    Assert.True(!string.IsNullOrWhiteSpace(session.WorkspaceRoot));
+    Assert.True(session.ResolutionSource is "ide-active-window" or "ide-storage" or "indexed-project" or "ide-recent-storage");
+}
+
+static void ActiveIdeResolverIgnoresSettingsFallbackInIde()
+{
+    var session = ActiveIdeResolver.Resolve(
+        "Notepad",
+        "Untitled - Notepad",
+        @"C:\Users\Admin\Documents\New project 5",
+        Array.Empty<string>());
+
+    Assert.Equal(@"C:\Users\Admin\Documents\New project 5", session.WorkspaceRoot);
+    Assert.Equal("settings", session.ResolutionSource);
 }
 
 static void TryDelete(string path)

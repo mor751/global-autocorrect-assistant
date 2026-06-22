@@ -40,13 +40,22 @@ public sealed class OllamaClient : IOllamaClient, IDisposable
         _settings = settings;
     }
 
-    private string Endpoint => (string.IsNullOrWhiteSpace(_settings.Endpoint) ? OllamaSettings.Default.Endpoint : _settings.Endpoint).TrimEnd('/');
+    private string Endpoint
+    {
+        get
+        {
+            var value = (string.IsNullOrWhiteSpace(_settings.Endpoint) ? OllamaSettings.Default.Endpoint : _settings.Endpoint).TrimEnd('/');
+            return value.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+                ? value.Replace("localhost", "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+                : value;
+        }
+    }
 
     public async Task<bool> IsAvailableAsync(CancellationToken cancellationToken)
     {
         try
         {
-            using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, quick.Token);
             using var response = await _httpClient.GetAsync($"{Endpoint}/api/tags", linked.Token);
             return response.IsSuccessStatusCode;

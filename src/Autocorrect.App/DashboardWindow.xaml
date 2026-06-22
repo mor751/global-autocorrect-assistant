@@ -437,6 +437,55 @@
                             </StackPanel>
                         </Border>
                     </Grid>
+
+                    <Grid x:Name="ProjectsPage" Visibility="Collapsed">
+                        <StackPanel>
+                            <Border Style="{StaticResource Card}" Margin="0,0,0,14">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Active Project (EXE + CLI)" Style="{StaticResource Label}" />
+                                        <TextBlock x:Name="ActiveProjectNameText" Text="No project selected" Foreground="{StaticResource Ink}" FontSize="20" FontWeight="SemiBold" Margin="0,8,0,0" />
+                                        <TextBlock x:Name="ActiveProjectPathText" Text="Choose a folder below" Foreground="#D5DDE7" FontSize="13" TextWrapping="Wrap" Margin="0,8,0,0" />
+                                        <TextBlock x:Name="ActiveProjectMetaText" Text="woody CLI and Ctrl+Alt+O use this folder" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,10,0,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <Button Content="Browse folder" Style="{StaticResource PrimaryButton}" Click="ProjectsBrowse_OnClick" Margin="0,0,0,8" />
+                                        <Button Content="Open Brain Web" Style="{StaticResource SecondaryButton}" Click="ProjectsOpenBrain_OnClick" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource Card}">
+                                <StackPanel>
+                                    <Grid Margin="0,0,0,12">
+                                        <TextBlock Text="Indexed &amp; recent projects" Foreground="{StaticResource Ink}" FontSize="17" FontWeight="SemiBold" />
+                                        <Button Content="Refresh" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" Click="ProjectsRefresh_OnClick" />
+                                    </Grid>
+                                    <ListView x:Name="ProjectsList" Height="420" MouseDoubleClick="ProjectsList_OnDoubleClick">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="Project" Width="160" DisplayMemberBinding="{Binding ProjectName}" />
+                                                <GridViewColumn Header="Status" Width="100" DisplayMemberBinding="{Binding Status}" />
+                                                <GridViewColumn Header="Vectors" Width="80" DisplayMemberBinding="{Binding Vectors}" />
+                                                <GridViewColumn Header="Last used" Width="120" DisplayMemberBinding="{Binding LastUsed}" />
+                                                <GridViewColumn Header="Path" Width="420" DisplayMemberBinding="{Binding ProjectRoot}" />
+                                            </GridView>
+                                        </ListView.View>
+                                    </ListView>
+                                    <WrapPanel Margin="0,14,0,0">
+                                        <Button Content="Set active" Style="{StaticResource PrimaryButton}" Click="ProjectsSetActive_OnClick" Margin="0,0,8,8" />
+                                        <Button Content="Index / Re-index" Style="{StaticResource SecondaryButton}" Click="ProjectsIndex_OnClick" Margin="0,0,8,8" />
+                                        <Button Content="Open Brain Web" Style="{StaticResource SecondaryButton}" Click="ProjectsOpenBrainSelected_OnClick" Margin="0,0,8,8" />
+                                        <Button Content="Open in Explorer" Style="{StaticResource SecondaryButton}" Click="ProjectsExplorer_OnClick" Margin="0,0,8,8" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </ScrollViewer>
         </Grid>

@@ -26,10 +26,11 @@ public sealed class PromptCompilerService
         }
 
         var writerPrompt = BuildWriterPrompt(request, cleaned);
-        var response = await _writer.GenerateAsync(writerPrompt, new OllamaGenerateOptions(0.15, 450), cancellationToken);
+        var response = await _writer.GenerateAsync(writerPrompt, new OllamaGenerateOptions(0.2, 1100), cancellationToken);
         var parsed = TryParseStructured(response);
         if (parsed is not null && !string.IsNullOrWhiteSpace(parsed.OptimizedPrompt))
         {
+            parsed.OptimizedPrompt = EnsureRichPrompt(parsed.OptimizedPrompt, cleaned, deterministic);
             parsed.UsedWriterModel = true;
             parsed.RelevantFiles = FilterRealFiles(parsed.RelevantFiles, request.Retrieval.Results);
             if (parsed.RelevantFiles.Count == 0)
@@ -122,19 +123,22 @@ public sealed class PromptCompilerService
 
     private const string WriterInstruction =
         "You are Woody, a Project-Aware Prompt Compiler for coding agents (Cursor, Codex, Claude Code). " +
-        "Rewrite the user's messy request into ONE precise, token-efficient prompt the agent can act on immediately.\n" +
+        "Rewrite the user's request into a detailed, actionable prompt the agent can execute without guessing.\n" +
         "Hard rules:\n" +
-        "- optimizedPrompt must be <= 150 words. No filler, no preamble, do not repeat these rules.\n" +
+        "- optimizedPrompt should be 120-280 words. Include enough detail for a senior engineer.\n" +
         "- Only use file paths found in retrievedContext. Never invent paths.\n" +
-        "- Reference only the 1-3 most relevant files; drop weakly related ones.\n" +
-        "- Keep the user's original intent and every concrete detail.\n" +
-        "- Tell the agent to inspect those files first and not refactor unrelated code.\n" +
-        "- If missingContext is non-empty or the request is too vague to act on, make optimizedPrompt a short clarifying question listing what is missing, and copy those items into warnings.\n" +
-        "optimizedPrompt must follow this skeleton, omitting empty sections:\n" +
-        "Task: <one sentence>\n" +
+        "- Reference 2-5 relevant files with a short why each matters.\n" +
+        "- Keep the user's original intent and every concrete detail they gave.\n" +
+        "- Add acceptance criteria and verification steps.\n" +
+        "- Tell the agent to inspect listed files first and avoid unrelated refactors.\n" +
+        "- If missingContext is non-empty, ask clarifying questions and list missing items in warnings.\n" +
+        "optimizedPrompt skeleton:\n" +
+        "Goal: <clear outcome>\n" +
+        "Context: <stack / area of codebase>\n" +
         "Files: <path - why it matters>\n" +
-        "Do: <2-4 short imperative steps>\n" +
-        "Avoid: <1-2 short limits>\n" +
+        "Steps: <numbered 3-6 steps>\n" +
+        "Acceptance: <how to verify success>\n" +
+        "Constraints: <what not to change>\n" +
         "Return strict JSON with keys: optimizedPrompt, relevantFiles, tasks, constraints, tokenSavingReason, warnings.";
 
     private const string WriterExample =
@@ -260,6 +264,26 @@ public sealed class PromptCompilerService
     }
 
     private static int EstimateTokens(string text) => string.IsNullOrWhiteSpace(text) ? 0 : Math.Max(1, (int)Math.Round(text.Length / 4.0));
+
+    private static string EnsureRichPrompt(string optimized, string original, PromptCompilerResult deterministic)
+    {
+        var originalWords = original.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        var optimizedWords = optimized.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+        if (optimizedWords >= Math.Max(40, (int)(originalWords * 0.9)))
+        {
+            return optimized.Trim();
+        }
+
+        var builder = new StringBuilder(optimized.Trim());
+        if (!string.IsNullOrWhiteSpace(deterministic.OptimizedPrompt))
+        {
+            builder.AppendLine();
+            builder.AppendLine();
+            builder.Append(deterministic.OptimizedPrompt);
+        }
+
+        return builder.ToString().Trim();
+    }
 
     private static string ReadString(JsonElement element, string name)
     {

@@ -16,9 +16,7 @@ public sealed class SettingsRepository
     private readonly string _learnedCorrectionsPath;
     private readonly string _protectedVocabularyPath;
 
-    public static string DataDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "GlobalAutocorrect");
+    public static string DataDirectory { get; } = AppPaths.DataDirectory;
 
     public SettingsRepository()
     {

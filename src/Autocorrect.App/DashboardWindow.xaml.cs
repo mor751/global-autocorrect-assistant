@@ -25,6 +25,9 @@ public partial class DashboardWindow : Window
     private readonly Action _openProjectBrain;
     private readonly Action _setPetImage;
     private readonly Action _reapplySettings;
+    private readonly Action<string> _setActiveProject;
+    private readonly Func<string, Task> _indexProjectAt;
+    private readonly Action<string> _openBrainWeb;
     private VectorStoreStats? _lastVectorStats;
     private RetrievalResponse? _lastRetrieval;
     private ProjectIndexMetadata? _lastMetadata;
@@ -41,7 +44,10 @@ public partial class DashboardWindow : Window
         Func<Task> showVectorStoreStatus,
         Action openProjectBrain,
         Action setPetImage,
-        Action reapplySettings)
+        Action reapplySettings,
+        Action<string> setActiveProject,
+        Func<string, Task> indexProjectAt,
+        Action<string> openBrainWeb)
     {
         InitializeComponent();
         _store = store;
@@ -56,6 +62,9 @@ public partial class DashboardWindow : Window
         _openProjectBrain = openProjectBrain;
         _setPetImage = setPetImage;
         _reapplySettings = reapplySettings;
+        _setActiveProject = setActiveProject;
+        _indexProjectAt = indexProjectAt;
+        _openBrainWeb = openBrainWeb;
         Loaded += async (_, _) =>
         {
             ShowPage(DashboardPage, DashboardNav, "RAG Dashboard", "Monitor your Retrieval-Augmented Generation pipeline and knowledge brain.");
@@ -81,6 +90,12 @@ public partial class DashboardWindow : Window
 
     public void Refresh()
     {
+        var activeRoot = ActiveProjectStore.Get(_settings) ?? _settings.ProjectRoot;
+        if (!string.IsNullOrWhiteSpace(activeRoot) && !string.Equals(activeRoot, _settings.ProjectRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            _settings.ProjectRoot = activeRoot;
+        }
+
         var brain = _projectBrain.LoadBrain(_settings.ProjectRoot);
         var metadata = _projectBrain.LoadIndexMetadata(_settings.ProjectRoot);
         _lastMetadata = metadata ?? _lastMetadata;
@@ -231,7 +246,11 @@ public partial class DashboardWindow : Window
 
     private void HistoryNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Prompt History", "Recent optimized prompts appear on the dashboard. A full history table will live here.");
 
-    private void ProjectsNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Projects", "Choose a project folder from the dashboard or Woody Brain page.");
+    private void ProjectsNav_OnClick(object sender, RoutedEventArgs e)
+    {
+        ShowPage(ProjectsPage, ProjectsNav, "Projects", "Choose which folder Woody brain, CLI, and Ctrl+Alt+O use.");
+        RefreshProjectsPage();
+    }
 
     private void SettingsNav_OnClick(object sender, RoutedEventArgs e) => ShowPlaceholder("Settings", $"Embedder: bge-small ONNX (in-process)\nVector DB: SQLite (local)\nWriter: {_settings.WriterModel}");
 
@@ -366,6 +385,7 @@ public partial class DashboardWindow : Window
         DashboardPage.Visibility = Visibility.Collapsed;
         BrainPage.Visibility = Visibility.Collapsed;
         VectorPage.Visibility = Visibility.Collapsed;
+        ProjectsPage.Visibility = Visibility.Collapsed;
         PlaceholderPage.Visibility = Visibility.Collapsed;
         page.Visibility = Visibility.Visible;
         HeaderTitle.Text = title;
@@ -381,6 +401,155 @@ public partial class DashboardWindow : Window
         nav.Background = new SolidColorBrush(WpfColor.FromRgb(31, 49, 78));
         nav.BorderBrush = new SolidColorBrush(WpfColor.FromRgb(78, 121, 214));
         nav.Foreground = WpfBrushes.White;
+    }
+
+    private void RefreshProjectsPage()
+    {
+        var active = ActiveProjectStore.Get(_settings) ?? _settings.ProjectRoot;
+        if (!string.IsNullOrWhiteSpace(active))
+        {
+            _settings.ProjectRoot = active;
+        }
+
+        ActiveProjectNameText.Text = string.IsNullOrWhiteSpace(active)
+            ? "No project selected"
+            : Path.GetFileName(active.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        ActiveProjectPathText.Text = string.IsNullOrWhiteSpace(active) ? "Choose a folder below" : active;
+        var metadata = string.IsNullOrWhiteSpace(active) ? null : _projectBrain.LoadIndexMetadata(active);
+        var vectors = metadata?.EmbeddedChunks ?? 0;
+        ActiveProjectMetaText.Text = metadata is null
+            ? "woody CLI and Ctrl+Alt+O use the active folder from this page"
+            : $"{metadata.CurrentRagMode()} · {vectors:N0} vectors · CLI synced via active-project.json";
+
+        var rows = new Dictionary<string, ProjectListRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in _projectBrain.ListIndexedProjects())
+        {
+            var meta = _projectBrain.LoadIndexMetadata(path);
+            rows[path] = new ProjectListRow
+            {
+                ProjectRoot = path,
+                ProjectName = Path.GetFileName(path),
+                Status = meta?.Status.ToString() ?? "Indexed",
+                Vectors = (meta?.EmbeddedChunks ?? 0).ToString("N0"),
+                LastUsed = meta?.LastIndexedAt?.ToLocalTime().ToString("MMM d, HH:mm") ?? "-",
+                IsActive = string.Equals(path, active, StringComparison.OrdinalIgnoreCase)
+            };
+        }
+
+        foreach (var session in ProjectSessionRegistry.List())
+        {
+            if (!Directory.Exists(session.ProjectRoot))
+            {
+                continue;
+            }
+
+            if (rows.ContainsKey(session.ProjectRoot))
+            {
+                rows[session.ProjectRoot].LastUsed = session.LastUsedUtc.ToLocalTime().ToString("MMM d, HH:mm");
+                continue;
+            }
+
+            rows[session.ProjectRoot] = new ProjectListRow
+            {
+                ProjectRoot = session.ProjectRoot,
+                ProjectName = session.ProjectName,
+                Status = _projectBrain.IsIndexed(session.ProjectRoot) ? "Indexed" : "Not indexed",
+                Vectors = "-",
+                LastUsed = session.LastUsedUtc.ToLocalTime().ToString("MMM d, HH:mm"),
+                IsActive = string.Equals(session.ProjectRoot, active, StringComparison.OrdinalIgnoreCase)
+            };
+        }
+
+        ProjectsList.ItemsSource = rows.Values
+            .OrderByDescending(row => row.IsActive)
+            .ThenByDescending(row => row.LastUsed)
+            .ThenBy(row => row.ProjectName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private ProjectListRow? SelectedProjectRow() =>
+        ProjectsList.SelectedItem as ProjectListRow;
+
+    private void ProjectsBrowse_OnClick(object sender, RoutedEventArgs e) => _chooseFolder();
+
+    private void ProjectsRefresh_OnClick(object sender, RoutedEventArgs e) => RefreshProjectsPage();
+
+    private void ProjectsSetActive_OnClick(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is null)
+        {
+            return;
+        }
+
+        _setActiveProject(row.ProjectRoot);
+        Refresh();
+        RefreshProjectsPage();
+    }
+
+    private async void ProjectsIndex_OnClick(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is null)
+        {
+            return;
+        }
+
+        await _indexProjectAt(row.ProjectRoot);
+        Refresh();
+        RefreshProjectsPage();
+    }
+
+    private void ProjectsOpenBrain_OnClick(object sender, RoutedEventArgs e)
+    {
+        var active = ActiveProjectStore.Get(_settings) ?? _settings.ProjectRoot;
+        if (!string.IsNullOrWhiteSpace(active))
+        {
+            _openBrainWeb(active);
+        }
+    }
+
+    private void ProjectsOpenBrainSelected_OnClick(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is not null)
+        {
+            _openBrainWeb(row.ProjectRoot);
+        }
+    }
+
+    private void ProjectsExplorer_OnClick(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is null || !Directory.Exists(row.ProjectRoot))
+        {
+            return;
+        }
+
+        Process.Start(new ProcessStartInfo("explorer.exe", $"\"{row.ProjectRoot}\"") { UseShellExecute = true });
+    }
+
+    private void ProjectsList_OnDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is null)
+        {
+            return;
+        }
+
+        _setActiveProject(row.ProjectRoot);
+        Refresh();
+        RefreshProjectsPage();
+    }
+
+    private sealed class ProjectListRow
+    {
+        public string ProjectRoot { get; set; } = string.Empty;
+        public string ProjectName { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string Vectors { get; set; } = string.Empty;
+        public string LastUsed { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
     }
 
     private void ApplyEmbeddingDiagnostics(EmbeddingDiagnostics diagnostics)
