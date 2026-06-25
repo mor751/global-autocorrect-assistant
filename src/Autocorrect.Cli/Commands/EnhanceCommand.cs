@@ -3,8 +3,9 @@ namespace Autocorrect.Cli.Commands;
 internal sealed class EnhanceCommand : ICliCommand
 {
     public string Name => "enhance";
-    public string Summary => "Alias for prompt — optimize a prompt with project context";
+
+    public string Summary => "Hidden alias for prompt";
 
     public Task<int> RunAsync(string[] args, CliContext context) =>
-        PromptCommandRunner.RunAsync(args, context, "Woody enhance");
+        PromptCommandRunner.RunAsync(args, context);
 }

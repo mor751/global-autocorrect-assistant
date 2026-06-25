@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using Autocorrect.Cli;
 
 namespace Autocorrect.Cli.Brain;
 
@@ -12,7 +13,6 @@ internal static class BrainPortResolver
     if (await IsWoodyBrainRunningAsync(preferredPort, cancellationToken))
     {
       var url = $"http://127.0.0.1:{preferredPort}";
-      Console.WriteLine($"Brain already running at {url}");
       if (openBrowser)
       {
         TryOpenBrowser(url);
@@ -33,7 +33,7 @@ internal static class BrainPortResolver
         continue;
       }
 
-      Console.WriteLine($"Port {preferredPort} is busy. Using {port} instead.");
+      WoodyConsole.WriteDim($"Port {preferredPort} is busy. Using {port} instead.");
       return new BrainPortResolution($"http://127.0.0.1:{port}", AlreadyRunning: false, port);
     }
 

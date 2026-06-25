@@ -6,24 +6,13 @@ namespace Autocorrect.Cli;
 
 internal static class Program
 {
-    private static readonly ICliCommand[] Commands =
-    [
-        new IndexCommand(),
-        new ReloadCommand(),
-        new StatusCommand(),
-        new SearchCommand(),
-        new PromptCommand(),
-        new EnhanceCommand(),
-        new DoctorCommand(),
-        new VectorsCommand(),
-        new BrainCommand()
-    ];
+    private static readonly Dictionary<string, ICliCommand> Commands = BuildCommands();
 
     public static async Task<int> Main(string[] args)
     {
         if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
         {
-            PrintHelp();
+            WoodyConsole.WriteHelp();
             return 0;
         }
 
@@ -35,12 +24,12 @@ internal static class Program
             using var brain = new ProjectBrainService(AppPaths.DataDirectory, BrainOptionsFactory.FromSettings(settings));
             var context = new CliContext(settings, brain, string.IsNullOrWhiteSpace(projectRoot) ? null : Path.GetFullPath(projectRoot));
 
-            var commandName = args[0].Equals("sync", StringComparison.OrdinalIgnoreCase) ? "reload" : args[0];
-            var command = Commands.FirstOrDefault(item => item.Name.Equals(commandName, StringComparison.OrdinalIgnoreCase));
-            if (command is null)
+            var commandName = ResolveCommandName(args[0]);
+            if (!Commands.TryGetValue(commandName, out var command))
             {
-                Console.Error.WriteLine($"Unknown command: {args[0]}");
-                PrintHelp();
+                WoodyConsole.WriteError($"Unknown command: {args[0]}");
+                Console.WriteLine();
+                WoodyConsole.WriteHelp();
                 return 1;
             }
 
@@ -48,41 +37,38 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            WoodyConsole.WriteError(ex.Message);
             return 1;
         }
     }
 
-    private static void PrintHelp()
+    private static Dictionary<string, ICliCommand> BuildCommands()
     {
-        Console.WriteLine("Woody CLI — project-aware brain for coding prompts");
-        Console.WriteLine();
-        Console.WriteLine("Usage: woody <command> [options]");
-        Console.WriteLine();
-        foreach (var command in Commands)
+        ICliCommand[] commands =
+        [
+            new IndexCommand(),
+            new BrainCommand(),
+            new PromptCommand(),
+            new SearchCommand(),
+            new ReloadCommand(),
+            new DoctorCommand(),
+            new EnhanceCommand(),
+            new StatusCommand(),
+            new VectorsCommand()
+        ];
+
+        var map = new Dictionary<string, ICliCommand>(StringComparer.OrdinalIgnoreCase);
+        foreach (var command in commands)
         {
-            Console.WriteLine($"  {command.Name,-10} {command.Summary}");
+            map[command.Name] = command;
         }
 
-        Console.WriteLine();
-        Console.WriteLine("Global options:");
-        Console.WriteLine("  --path <folder>   Project root (or active project from Woody dashboard)");
-        Console.WriteLine("  --rag             Vector RAG only (semantic search)");
-        Console.WriteLine("  --ast             AST graph only (symbols + imports/calls)");
-        Console.WriteLine();
-        Console.WriteLine("Examples:");
-        Console.WriteLine("  woody doctor");
-        Console.WriteLine("  woody index \"C:\\repo\"");
-        Console.WriteLine("  woody reload              # update brain if files changed");
-        Console.WriteLine("  woody reload --force      # full rescan");
-        Console.WriteLine("  woody sync                # alias for reload");
-        Console.WriteLine("  woody search \"vector db unavailable\"");
-        Console.WriteLine("  woody prompt find --rag");
-        Console.WriteLine("  woody prompt FindBos --ast");
-        Console.WriteLine("  woody prompt \"fix dashboard refresh\"");
-        Console.WriteLine("  woody prompt --prompt \"add auth middleware\" --path \"C:\\repo\"");
-        Console.WriteLine("  woody enhance \"fix dashboard refresh\"   # alias");
-        Console.WriteLine("  woody vectors count");
-        Console.WriteLine("  woody brain open");
+        map["sync"] = map["reload"];
+        return map;
     }
+
+    private static string ResolveCommandName(string raw) =>
+        raw.Equals("sync", StringComparison.OrdinalIgnoreCase) ? "reload"
+        : raw.Equals("enhance", StringComparison.OrdinalIgnoreCase) ? "prompt"
+        : raw;
 }
