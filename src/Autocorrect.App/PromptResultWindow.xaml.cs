@@ -119,10 +119,10 @@ public partial class PromptResultWindow : Window
 
     private async void Reindex_OnClick(object sender, RoutedEventArgs e)
     {
-        ReindexButton.Content = "Re-indexing…";
+        ReindexButton.Content = "Reloading…";
         ReindexButton.IsEnabled = false;
         await _reindexAction();
-        ReindexButton.Content = "Re-indexed";
+        ReindexButton.Content = "Reloaded";
     }
 
     private void OpenBrain_OnClick(object sender, RoutedEventArgs e) => _openBrainAction();

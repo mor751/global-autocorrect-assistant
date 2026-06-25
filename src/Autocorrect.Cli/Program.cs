@@ -9,6 +9,7 @@ internal static class Program
     private static readonly ICliCommand[] Commands =
     [
         new IndexCommand(),
+        new ReloadCommand(),
         new StatusCommand(),
         new SearchCommand(),
         new PromptCommand(),
@@ -34,7 +35,8 @@ internal static class Program
             using var brain = new ProjectBrainService(AppPaths.DataDirectory, BrainOptionsFactory.FromSettings(settings));
             var context = new CliContext(settings, brain, string.IsNullOrWhiteSpace(projectRoot) ? null : Path.GetFullPath(projectRoot));
 
-            var command = Commands.FirstOrDefault(item => item.Name.Equals(args[0], StringComparison.OrdinalIgnoreCase));
+            var commandName = args[0].Equals("sync", StringComparison.OrdinalIgnoreCase) ? "reload" : args[0];
+            var command = Commands.FirstOrDefault(item => item.Name.Equals(commandName, StringComparison.OrdinalIgnoreCase));
             if (command is null)
             {
                 Console.Error.WriteLine($"Unknown command: {args[0]}");
@@ -65,12 +67,20 @@ internal static class Program
         Console.WriteLine();
         Console.WriteLine("Global options:");
         Console.WriteLine("  --path <folder>   Project root (or active project from Woody dashboard)");
+        Console.WriteLine("  --rag             Vector RAG only (semantic search)");
+        Console.WriteLine("  --ast             AST graph only (symbols + imports/calls)");
         Console.WriteLine();
         Console.WriteLine("Examples:");
         Console.WriteLine("  woody doctor");
         Console.WriteLine("  woody index \"C:\\repo\"");
+        Console.WriteLine("  woody reload              # update brain if files changed");
+        Console.WriteLine("  woody reload --force      # full rescan");
+        Console.WriteLine("  woody sync                # alias for reload");
         Console.WriteLine("  woody search \"vector db unavailable\"");
+        Console.WriteLine("  woody prompt find --rag");
+        Console.WriteLine("  woody prompt FindBos --ast");
         Console.WriteLine("  woody prompt \"fix dashboard refresh\"");
+        Console.WriteLine("  woody prompt --prompt \"add auth middleware\" --path \"C:\\repo\"");
         Console.WriteLine("  woody enhance \"fix dashboard refresh\"   # alias");
         Console.WriteLine("  woody vectors count");
         Console.WriteLine("  woody brain open");

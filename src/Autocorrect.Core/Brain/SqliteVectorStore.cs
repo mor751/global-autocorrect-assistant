@@ -44,6 +44,8 @@ public interface IProjectVectorStore : IDisposable
 
     Task<IReadOnlyList<RetrievalResult>> SearchBySymbolsAsync(string collectionName, IReadOnlyList<string> symbols, int perSymbol, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<RetrievalResult>> SearchByTermsAsync(string collectionName, IReadOnlyList<string> terms, int perTerm, CancellationToken cancellationToken);
+
     Task UpsertSymbolGraphAsync(string collectionName, ProjectGraph graph, CancellationToken cancellationToken);
 
     Task<(int Nodes, int Edges)> GetSymbolGraphStatsAsync(string collectionName, CancellationToken cancellationToken);
@@ -316,6 +318,37 @@ public sealed class SqliteVectorStore : IProjectVectorStore
             while (reader.Read())
             {
                 var hit = ReadRetrievalResult(reader, 0.99, "prompt symbol");
+                results.Add(hit);
+            }
+        }
+
+        return Task.FromResult<IReadOnlyList<RetrievalResult>>(results);
+    }
+
+    public Task<IReadOnlyList<RetrievalResult>> SearchByTermsAsync(string collectionName, IReadOnlyList<string> terms, int perTerm, CancellationToken cancellationToken)
+    {
+        if (terms.Count == 0)
+        {
+            return Task.FromResult<IReadOnlyList<RetrievalResult>>(Array.Empty<RetrievalResult>());
+        }
+
+        var results = new List<RetrievalResult>();
+        foreach (var term in terms.Distinct(StringComparer.OrdinalIgnoreCase).Take(12))
+        {
+            using var command = _connection.CreateCommand();
+            command.CommandText =
+                "SELECT filePath, fileName, folder, extension, language, chunkType, symbol, startLine, endLine, content, contentPreview, importance " +
+                "FROM chunks WHERE collection = $c AND (" +
+                "LOWER(symbol) LIKE $like OR LOWER(filePath) LIKE $like OR LOWER(content) LIKE $like OR LOWER(contentPreview) LIKE $like" +
+                ") ORDER BY importance DESC, startLine ASC LIMIT $limit";
+            command.Parameters.AddWithValue("$c", collectionName);
+            command.Parameters.AddWithValue("$like", $"%{term.ToLowerInvariant()}%");
+            command.Parameters.AddWithValue("$limit", Math.Max(1, perTerm));
+
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var hit = ReadRetrievalResult(reader, 0.94, $"AST term '{term}'");
                 results.Add(hit);
             }
         }

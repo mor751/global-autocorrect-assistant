@@ -216,6 +216,75 @@ public sealed class ProjectBrainService : IDisposable
         return brain;
     }
 
+    // Rescans disk and re-embeds only when files changed (or when forced / not yet indexed).
+    public async Task<ProjectSyncReport> SyncAsync(string projectRoot, bool force, CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeProjectRoot(projectRoot);
+        var report = new ProjectSyncReport { ProjectRoot = normalized, WasIndexed = IsIndexed(normalized) };
+
+        if (!report.WasIndexed)
+        {
+            var brain = await IndexAsync(normalized, cancellationToken);
+            ApplySyncResult(report, brain, LoadIndexMetadata(normalized), changesDetected: true, performed: true,
+                "Initial index completed.");
+            return report;
+        }
+
+        if (!force)
+        {
+            var previous = LoadIndexMetadata(normalized);
+            var changes = await Task.Run(
+                () => ProjectFolderChangeDetector.Detect(normalized, _options.Index, previous),
+                cancellationToken);
+            if (!changes.HasChanges)
+            {
+                report.ChangesDetected = false;
+                report.SyncPerformed = false;
+                report.Message = "No file changes since last index. Brain is up to date.";
+                var metadata = LoadIndexMetadata(normalized);
+                if (metadata is not null)
+                {
+                    report.TotalFiles = metadata.IndexedFiles;
+                    report.TotalChunks = metadata.TotalChunks;
+                    report.EmbeddedChunks = metadata.EmbeddedChunks;
+                }
+
+                return report;
+            }
+
+            report.AddedFiles = changes.Added.Count;
+            report.ModifiedFiles = changes.Modified.Count;
+            report.RemovedFiles = changes.Removed.Count;
+        }
+        else
+        {
+            report.ChangesDetected = true;
+        }
+
+        var updated = await IndexAsync(normalized, cancellationToken);
+        var message = force
+            ? "Full reload completed."
+            : $"Reloaded brain: {report.AddedFiles} added, {report.ModifiedFiles} modified, {report.RemovedFiles} removed.";
+        ApplySyncResult(report, updated, LoadIndexMetadata(normalized), changesDetected: true, performed: true, message);
+        return report;
+    }
+
+    private static void ApplySyncResult(
+        ProjectSyncReport report,
+        ProjectBrainData brain,
+        ProjectIndexMetadata? metadata,
+        bool changesDetected,
+        bool performed,
+        string message)
+    {
+        report.ChangesDetected = changesDetected;
+        report.SyncPerformed = performed;
+        report.Message = message;
+        report.TotalFiles = metadata?.IndexedFiles ?? brain.Files.Count;
+        report.TotalChunks = metadata?.TotalChunks ?? 0;
+        report.EmbeddedChunks = metadata?.EmbeddedChunks ?? 0;
+    }
+
     public ProjectBrainData? LoadBrain(string? projectRoot)
     {
         if (string.IsNullOrWhiteSpace(projectRoot) || !File.Exists(BrainPath(projectRoot)))
@@ -237,7 +306,8 @@ public sealed class ProjectBrainService : IDisposable
         string originalPrompt,
         string? projectRoot,
         CancellationToken cancellationToken,
-        PromptTargetAgent targetAgent = PromptTargetAgent.Codex)
+        PromptTargetAgent targetAgent = PromptTargetAgent.Codex,
+        RetrievalEnginePreference retrievalEngine = RetrievalEnginePreference.Hybrid)
     {
         var brain = LoadBrain(projectRoot);
         var ollamaAvailable = await _ollama.IsAvailableAsync(cancellationToken);
@@ -245,7 +315,7 @@ public sealed class ProjectBrainService : IDisposable
 
         var retrieval = brain is null
             ? new RetrievalResponse { Query = originalPrompt, RetrievalMode = RetrievalMode.NoBrain }
-            : await RetrieveDetailedAsync(originalPrompt, projectRoot!, brain, cancellationToken);
+            : await RetrieveDetailedAsync(originalPrompt, projectRoot!, brain, cancellationToken, retrievalEngine: retrievalEngine);
         var retrieved = ToRetrievedFiles(retrieval, brain);
 
         var analysis = _analyzer.Analyze(originalPrompt, brain, retrieved, preferences);
@@ -322,7 +392,8 @@ public sealed class ProjectBrainService : IDisposable
         string query,
         string? projectRoot,
         int topK,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RetrievalEnginePreference retrievalEngine = RetrievalEnginePreference.Hybrid)
     {
         var brain = LoadBrain(projectRoot);
         if (brain is null || string.IsNullOrWhiteSpace(projectRoot))
@@ -330,7 +401,7 @@ public sealed class ProjectBrainService : IDisposable
             return new RetrievalResponse { Query = query, RetrievalMode = RetrievalMode.NoBrain };
         }
 
-        return await RetrieveDetailedAsync(query, projectRoot, brain, cancellationToken, topK);
+        return await RetrieveDetailedAsync(query, projectRoot, brain, cancellationToken, topK, retrievalEngine);
     }
 
     private async Task<RetrievalResponse> RetrieveDetailedAsync(
@@ -338,14 +409,21 @@ public sealed class ProjectBrainService : IDisposable
         string projectRoot,
         ProjectBrainData brain,
         CancellationToken cancellationToken,
-        int? topK = null)
+        int? topK = null,
+        RetrievalEnginePreference retrievalEngine = RetrievalEnginePreference.Hybrid)
     {
         var metadata = LoadIndexMetadata(projectRoot);
         using var embeddings = CreateEmbeddingService();
         using var store = CreateVectorStore();
         var fallback = CreateFallbackStore(projectRoot);
         var retrieval = new RagRetrievalService(embeddings, store, fallback, metadata);
-        return await retrieval.RetrieveAsync(prompt, brain, projectRoot, topK ?? _options.RetrievalTopK, cancellationToken);
+        return await retrieval.RetrieveAsync(
+            prompt,
+            brain,
+            projectRoot,
+            topK ?? _options.RetrievalTopK,
+            retrievalEngine,
+            cancellationToken);
     }
 
     private FileVectorStore CreateFallbackStore(string projectRoot) =>

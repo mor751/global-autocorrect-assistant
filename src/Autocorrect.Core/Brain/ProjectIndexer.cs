@@ -58,6 +58,8 @@ public sealed class ProjectIndexer : IProjectIndexer
         }
 
         GraphExtractionMerger.Apply(brain, extractions);
+        CrossFileCallGraphResolver.Apply(brain);
+        brain.Architecture = ProjectArchitectureIndexer.Build(brain);
         var summariesByPath = brain.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
         var chunks = new List<ProjectChunk>();
         var notEmbedded = new List<SkippedFile>();

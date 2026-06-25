@@ -10,10 +10,19 @@ var tests = new (string Name, Action Run)[]
     ("brain indexer detects stack and ignores secrets", BrainIndexerDetectsStackAndIgnoresSecrets),
     ("brain detailed index creates hashed chunks", BrainDetailedIndexCreatesHashedChunks),
     ("markdown chunker splits by headings", MarkdownChunkerSplitsByHeadings),
+    ("project folder change detector finds edits", ProjectFolderChangeDetectorFindsEdits),
     ("prompt compiler fallback does not invent files", PromptCompilerFallbackDoesNotInventFiles),
+    ("token efficient prompt assembler formats line hits", TokenEfficientPromptAssemblerFormatsLineHits),
     ("sqlite vector store round-trips and ranks by cosine", SqliteVectorStoreRoundTripsAndRanks),
     ("csharp ast chunker extracts class and method", CsharpAstChunkerExtractsSymbols),
     ("graph retriever finds import neighbors", GraphRetrieverFindsImportNeighbors),
+    ("graph symbol traverser follows call edges", GraphSymbolTraverserFollowsCallEdges),
+    ("graph extraction merger stores line metadata", GraphExtractionMergerStoresLineMetadata),
+    ("architecture indexer finds hub files", ArchitectureIndexerFindsHubFiles),
+    ("entry point indexer detects program cs", EntryPointIndexerDetectsProgramCs),
+    ("cross file call graph links symbols", CrossFileCallGraphLinksSymbols),
+    ("architecture community indexer groups files", ArchitectureCommunityIndexerGroupsFiles),
+    ("tree-sitter content preparer extracts vue script", TreeSitterContentPreparerExtractsVueScript),
     ("symbol graph persists in sqlite", SymbolGraphPersistsInSqlite),
     ("tree-sitter extracts typescript symbols", TreeSitterExtractsTypescriptSymbols),
     ("prompt symbol parser finds qualified names", PromptSymbolParserFindsQualifiedNames),
@@ -400,6 +409,39 @@ static void MarkdownChunkerSplitsByHeadings()
     }
 }
 
+static void ProjectFolderChangeDetectorFindsEdits()
+{
+    var root = Path.Combine(Path.GetTempPath(), "woody_sync_" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(root);
+    var file = Path.Combine(root, "app.ts");
+    File.WriteAllText(file, "export const version = 1;");
+    try
+    {
+        var options = new IndexOptions { MaxFiles = 50 };
+        var scanner = new ProjectScanner();
+        var scanned = scanner.Scan(root, options, out _);
+        var hash = scanned[0].Hash;
+        var previous = new ProjectIndexMetadata
+        {
+            FileHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["app.ts"] = hash
+            }
+        };
+
+        var unchanged = ProjectFolderChangeDetector.Detect(root, options, previous);
+        Assert.False(unchanged.HasChanges, "Expected no changes for same file content.");
+
+        File.WriteAllText(file, "export const version = 2;");
+        var changed = ProjectFolderChangeDetector.Detect(root, options, previous);
+        Assert.True(changed.Modified.Count == 1, "Expected one modified file.");
+    }
+    finally
+    {
+        Directory.Delete(root, true);
+    }
+}
+
 static void PromptCompilerFallbackDoesNotInventFiles()
 {
     var compiler = new PromptCompilerService(new FakeOllamaClient());
@@ -425,6 +467,36 @@ static void PromptCompilerFallbackDoesNotInventFiles()
     Assert.True(result.OptimizedPrompt.Contains("src/components/LoginForm.tsx", StringComparison.Ordinal), "Expected real retrieved file.");
     Assert.True(result.OptimizedPrompt.Contains("src/lib/auth.ts", StringComparison.Ordinal), "Expected real retrieved file.");
     Assert.False(result.OptimizedPrompt.Contains("src/app/api/auth/route.ts", StringComparison.Ordinal), "Must not invent files.");
+    Assert.False(result.OptimizedPrompt.Contains("Goal:", StringComparison.Ordinal), "Verbose Goal header should not appear.");
+    var filesIndex = result.OptimizedPrompt.IndexOf("Read at files:", StringComparison.Ordinal);
+    Assert.True(filesIndex > 0, "Compact prompt should be followed by Read at files section.");
+    Assert.True(filesIndex > result.OptimizedPrompt.IndexOf("login", StringComparison.OrdinalIgnoreCase), "Prompt body should come before the file list.");
+}
+
+static void TokenEfficientPromptAssemblerFormatsLineHits()
+{
+    var assembled = TokenEfficientPromptAssembler.Assemble(
+        "Find where BOS is configured, including UI and settings.",
+        new PromptCompilerRequest
+        {
+            OriginalPrompt = "where is bos configured in the app",
+            TargetAgent = PromptTargetAgent.Codex,
+            Retrieval = new RetrievalResponse
+            {
+                Results = new List<RetrievalResult>
+                {
+                    new() { FilePath = "src/BosConfig.cs", Symbol = "BosSettings", StartLine = 12, EndLine = 40, Score = 0.95 },
+                    new() { FilePath = "src/BosUi.xaml", Symbol = "BosPanel", StartLine = 5, EndLine = 18, Score = 0.91 },
+                    new() { FilePath = "src/BosConfig.cs", Symbol = "ApplyBos", StartLine = 55, EndLine = 72, Score = 0.88 }
+                }
+            }
+        },
+        PromptTargetAgent.Codex);
+
+    Assert.True(assembled.Contains("Read at files:", StringComparison.Ordinal));
+    Assert.True(assembled.Contains("src/BosConfig.cs:12-40 (BosSettings)", StringComparison.Ordinal));
+    Assert.True(assembled.Contains("src/BosUi.xaml:5-18 (BosPanel)", StringComparison.Ordinal));
+    Assert.False(assembled.Contains("Goal:", StringComparison.Ordinal));
 }
 
 static void SqliteVectorStoreRoundTripsAndRanks()
@@ -497,6 +569,155 @@ static void GraphRetrieverFindsImportNeighbors()
 
     var neighbors = GraphRetriever.NeighborFilePaths(brain, seeds);
     Assert.True(neighbors.Contains("src/b.ts"), "Expected imported neighbor file.");
+}
+
+static void GraphSymbolTraverserFollowsCallEdges()
+{
+    var brain = new ProjectBrainData();
+    brain.Graph.UpsertNode("sym:src/A.cs:Run:10", NodeType.Function, "Run", "src/A.cs", new Dictionary<string, string> { ["startLine"] = "10", ["endLine"] = "20" });
+    brain.Graph.UpsertNode("sym:src/B.cs:Apply:30", NodeType.Function, "Apply", "src/B.cs", new Dictionary<string, string> { ["startLine"] = "30", ["endLine"] = "45" });
+    brain.Graph.AddEdge("sym:src/A.cs:Run:10", "sym:src/B.cs:Apply:30", EdgeType.Calls);
+
+    var hits = GraphSymbolTraverser.Traverse(brain, new List<RetrievalResult>
+    {
+        new() { FilePath = "src/A.cs", Symbol = "Run", Score = 0.95 }
+    });
+
+    Assert.True(hits.Any(hit => hit.FilePath == "src/B.cs" && hit.Symbol == "Apply" && hit.StartLine == 30), "Expected call-graph neighbor with line metadata.");
+}
+
+static void GraphExtractionMergerStoresLineMetadata()
+{
+    var brain = new ProjectBrainData
+    {
+        Files =
+        {
+            new ProjectFileSummary { Path = "src/Demo.cs", Summary = "demo" }
+        }
+    };
+
+    GraphExtractionMerger.Apply(brain, new List<GraphExtractionResult>
+    {
+        new()
+        {
+            SourceFile = "src/Demo.cs",
+            Nodes =
+            {
+                new ExtractionNode
+                {
+                    Id = "sym:src/Demo.cs:BosSettings:12",
+                    Label = "BosSettings",
+                    SourceFile = "src/Demo.cs",
+                    Kind = "class",
+                    StartLine = 12,
+                    EndLine = 40
+                }
+            }
+        }
+    });
+
+    var node = brain.Graph.Nodes.Single(item => item.Label == "BosSettings");
+    Assert.Equal("12", node.Meta["startLine"]);
+    Assert.Equal("40", node.Meta["endLine"]);
+}
+
+static void ArchitectureIndexerFindsHubFiles()
+{
+    var brain = new ProjectBrainData
+    {
+        Files =
+        {
+            new ProjectFileSummary { Path = "src/Core.cs", Role = FileRole.Util },
+            new ProjectFileSummary { Path = "src/Api.cs", Role = FileRole.Api }
+        }
+    };
+
+    brain.Graph.UpsertNode("sym:src/Core.cs:Run:1", NodeType.Function, "Run", "src/Core.cs", new Dictionary<string, string> { ["startLine"] = "1", ["endLine"] = "10" });
+    brain.Graph.UpsertNode("sym:src/Api.cs:Handle:1", NodeType.Function, "Handle", "src/Api.cs", new Dictionary<string, string> { ["startLine"] = "1", ["endLine"] = "10" });
+    brain.Graph.AddEdge("sym:src/Core.cs:Run:1", "sym:src/Api.cs:Handle:1", EdgeType.Calls);
+    brain.Graph.AddEdge("file:src/Core.cs", "sym:src/Core.cs:Run:1", EdgeType.Contains);
+
+    var profile = ProjectArchitectureIndexer.Build(brain);
+    Assert.True(profile.Hubs.Any(hub => hub.FilePath == "src/Core.cs"), "Expected highly connected file to become an architecture hub.");
+}
+
+static void EntryPointIndexerDetectsProgramCs()
+{
+    var brain = new ProjectBrainData
+    {
+        Files =
+        {
+            new ProjectFileSummary { Path = "src/Program.cs", Importance = 0.9 },
+            new ProjectFileSummary { Path = "src/Utils.cs", Importance = 0.4 }
+        }
+    };
+
+    var points = EntryPointIndexer.Detect(brain);
+    Assert.True(points.Any(point => point.FilePath == "src/Program.cs"), "Expected Program.cs entry point.");
+}
+
+static void CrossFileCallGraphLinksSymbols()
+{
+    var brain = new ProjectBrainData
+    {
+        Files =
+        {
+            new ProjectFileSummary { Path = "src/A.cs" },
+            new ProjectFileSummary { Path = "src/B.cs" }
+        }
+    };
+
+    brain.Graph.UpsertNode("sym:src/A.cs:Run:1", NodeType.Function, "Run", "src/A.cs", new Dictionary<string, string> { ["kind"] = "method", ["startLine"] = "1", ["endLine"] = "8" });
+    brain.Graph.UpsertNode("sym:src/B.cs:Apply:1", NodeType.Function, "Apply", "src/B.cs", new Dictionary<string, string> { ["kind"] = "method", ["startLine"] = "1", ["endLine"] = "8" });
+    brain.Graph.UpsertNode("call:src/A.cs:Apply:4", NodeType.Function, "Apply", "src/A.cs", new Dictionary<string, string> { ["kind"] = "call" });
+    brain.Graph.AddEdge("sym:src/A.cs:Run:1", "call:src/A.cs:Apply:4", EdgeType.Calls);
+
+    CrossFileCallGraphResolver.Apply(brain);
+
+    Assert.True(brain.Graph.Edges.Any(edge =>
+        edge.Type == EdgeType.Calls &&
+        edge.From == "sym:src/A.cs:Run:1" &&
+        edge.To == "sym:src/B.cs:Apply:1"), "Expected cross-file symbol call edge.");
+    Assert.True(brain.Graph.Edges.Any(edge =>
+        edge.Type == EdgeType.Calls &&
+        edge.From == "file:src/A.cs" &&
+        edge.To == "file:src/B.cs"), "Expected cross-file edge.");
+}
+
+static void ArchitectureCommunityIndexerGroupsFiles()
+{
+    var brain = new ProjectBrainData
+    {
+        Files =
+        {
+            new ProjectFileSummary { Path = "src/a/One.cs", Role = FileRole.Util },
+            new ProjectFileSummary { Path = "src/a/Two.cs", Role = FileRole.Util },
+            new ProjectFileSummary { Path = "src/b/Other.cs", Role = FileRole.Api }
+        }
+    };
+
+    brain.Graph.AddNode("file:src/a/One.cs", NodeType.File, "One.cs", "src/a/One.cs");
+    brain.Graph.AddNode("file:src/a/Two.cs", NodeType.File, "Two.cs", "src/a/Two.cs");
+    brain.Graph.AddNode("file:src/b/Other.cs", NodeType.File, "Other.cs", "src/b/Other.cs");
+    brain.Graph.AddEdge("file:src/a/One.cs", "file:src/a/Two.cs", EdgeType.Imports);
+
+    var communities = ArchitectureCommunityIndexer.Build(brain);
+    Assert.True(communities.Any(community => community.FilePaths.Count >= 2), "Expected connected files in one community.");
+}
+
+static void TreeSitterContentPreparerExtractsVueScript()
+{
+    const string vue = """
+        <template><div /></template>
+        <script lang="ts">
+        export function mount() {}
+        </script>
+        """;
+
+    var prepared = TreeSitterContentPreparer.Prepare("src/App.vue", vue);
+    Assert.NotNull(prepared);
+    Assert.Equal("typescript", prepared!.LanguageKey);
+    Assert.True(prepared.Content.Contains("mount", StringComparison.Ordinal), "Expected vue script body.");
 }
 
 static void SymbolGraphPersistsInSqlite()

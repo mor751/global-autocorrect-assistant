@@ -215,7 +215,7 @@
             <Button x:Name="ReplaceButton" Content="Replace in app" Click="Replace_OnClick" />
             <Button x:Name="ShorterButton" Content="Use shorter" Click="Shorter_OnClick" />
             <Button x:Name="AddContextButton" Content="Add missing context" Click="AddContext_OnClick" />
-            <Button x:Name="ReindexButton" Content="Re-index project" Click="Reindex_OnClick" />
+            <Button x:Name="ReindexButton" Content="Reload files" Click="Reindex_OnClick" />
             <Button x:Name="OpenBrainButton" Content="Open Project Brain" Click="OpenBrain_OnClick" />
         </WrapPanel>
     </Grid>

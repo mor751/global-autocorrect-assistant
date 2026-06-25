@@ -33,10 +33,25 @@ public static class TreeSitterQueries
             (struct_item name: (type_identifier) @symbol) @unit
             (impl_item) @unit
             """,
-        "java" => """
+        "java" or "kotlin" => """
             (class_declaration name: (identifier) @symbol) @unit
             (method_declaration name: (identifier) @symbol) @unit
             (interface_declaration name: (identifier) @symbol) @unit
+            """,
+        "ruby" => """
+            (method name: (identifier) @symbol) @unit
+            (class name: (constant) @symbol) @unit
+            (module name: (constant) @symbol) @unit
+            """,
+        "php" => """
+            (function_definition name: (name) @symbol) @unit
+            (class_declaration name: (name) @symbol) @unit
+            (method_declaration name: (name) @symbol) @unit
+            """,
+        "swift" => """
+            (function_declaration name: (simple_identifier) @symbol) @unit
+            (class_declaration name: (type_identifier) @symbol) @unit
+            (protocol_declaration name: (type_identifier) @symbol) @unit
             """,
         _ => string.Empty
     };
@@ -61,7 +76,16 @@ public static class TreeSitterQueries
         "rust" => """
             (use_declaration argument: (_) @import)
             """,
-        "java" => """
+        "java" or "kotlin" => """
+            (import_declaration (_) @import)
+            """,
+        "ruby" => """
+            (call expression: (constant) @import)
+            """,
+        "php" => """
+            (namespace_use_declaration (_) @import)
+            """,
+        "swift" => """
             (import_declaration (_) @import)
             """,
         _ => string.Empty
@@ -89,8 +113,19 @@ public static class TreeSitterQueries
             (call_expression function: (identifier) @call)
             (call_expression function: (field_expression field: (field_identifier) @call))
             """,
-        "java" => """
+        "java" or "kotlin" => """
             (method_invocation name: (identifier) @call)
+            """,
+        "ruby" => """
+            (call method: (identifier) @call)
+            (call method: (simple_symbol) @call)
+            """,
+        "php" => """
+            (function_call_expression name: (name) @call)
+            (member_call_expression name: (name) @call)
+            """,
+        "swift" => """
+            (call_expression (simple_identifier) @call)
             """,
         _ => string.Empty
     };

@@ -64,8 +64,16 @@ public enum RetrievalMode
 {
     SemanticVector,
     HybridVectorKeyword,
+    AstGraph,
     KeywordFallback,
     NoBrain
+}
+
+public enum RetrievalEnginePreference
+{
+    Hybrid,
+    Rag,
+    Ast
 }
 
 public sealed class ProjectFileSummary
@@ -178,6 +186,21 @@ public sealed class ProjectIndexMetadata
     }
 }
 
+public sealed class ProjectSyncReport
+{
+    public string ProjectRoot { get; set; } = string.Empty;
+    public bool WasIndexed { get; set; }
+    public bool ChangesDetected { get; set; }
+    public bool SyncPerformed { get; set; }
+    public int AddedFiles { get; set; }
+    public int ModifiedFiles { get; set; }
+    public int RemovedFiles { get; set; }
+    public int TotalFiles { get; set; }
+    public int TotalChunks { get; set; }
+    public int EmbeddedChunks { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
 public sealed class RetrievalResult
 {
     public double Score { get; set; }
@@ -279,14 +302,43 @@ public sealed class ProjectGraph
     public List<GraphEdge> Edges { get; set; } = new();
 
     // Adds a node only once per id and returns its id for edge wiring.
-    public string AddNode(string id, NodeType type, string label, string? path = null)
+    public string AddNode(string id, NodeType type, string label, string? path = null) =>
+        UpsertNode(id, type, label, path, null);
+
+    public string UpsertNode(string id, NodeType type, string label, string? path, IReadOnlyDictionary<string, string>? meta)
     {
-        if (Nodes.All(n => n.Id != id))
+        var existing = Nodes.FirstOrDefault(node => node.Id == id);
+        if (existing is null)
         {
-            Nodes.Add(new GraphNode { Id = id, Type = type, Label = label, Path = path });
+            var node = new GraphNode { Id = id, Type = type, Label = label, Path = path };
+            ApplyMeta(node, meta);
+            Nodes.Add(node);
+            return id;
         }
 
+        if (!string.IsNullOrWhiteSpace(path))
+        {
+            existing.Path = path;
+        }
+
+        ApplyMeta(existing, meta);
         return id;
+    }
+
+    private static void ApplyMeta(GraphNode node, IReadOnlyDictionary<string, string>? meta)
+    {
+        if (meta is null)
+        {
+            return;
+        }
+
+        foreach (var pair in meta)
+        {
+            if (!node.Meta.ContainsKey(pair.Key) || pair.Key is "startLine" or "endLine")
+            {
+                node.Meta[pair.Key] = pair.Value;
+            }
+        }
     }
 
     // Adds a directed edge once, ignoring self-loops and duplicates.
@@ -315,6 +367,7 @@ public sealed class ProjectBrainData
     public List<string> Rules { get; set; } = new();
     public List<ProjectFileSummary> Files { get; set; } = new();
     public ProjectGraph Graph { get; set; } = new();
+    public ArchitectureProfile Architecture { get; set; } = new();
     public DateTimeOffset IndexedAt { get; set; }
 }
 

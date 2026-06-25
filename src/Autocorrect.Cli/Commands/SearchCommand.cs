@@ -7,10 +7,12 @@ internal sealed class SearchCommand : ICliCommand
 
     public async Task<int> RunAsync(string[] args, CliContext context)
     {
-        var projectRoot = CliArgs.RequireProject(args, context);
-        var query = CliArgs.Flag(args, "--query") ?? CliArgs.RequireText(args, "--query");
+        var projectRoot = CliArgs.ResolveProject(args, context);
+        var query = CliArgs.RequireQueryText(args);
+        var engine = CliArgs.ParseRetrievalEngine(args);
         var topK = CliArgs.IntFlag(args, "--top", context.Settings.RetrievalTopK);
-        var response = await context.Brain.SearchDetailedAsync(query, projectRoot, topK, CancellationToken.None);
+        var response = await context.Brain.SearchDetailedAsync(query, projectRoot, topK, CancellationToken.None, engine);
+        Console.WriteLine($"Engine: {CliArgs.DescribeEngine(engine)}");
         Console.WriteLine($"Mode: {response.RetrievalMode}");
         Console.WriteLine($"Query: {response.Query}");
         Console.WriteLine();

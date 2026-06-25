@@ -7,17 +7,22 @@ public sealed class TreeSitterExtractor
 {
     public GraphExtractionResult? TryExtract(string relativePath, string content)
     {
-        if (string.IsNullOrWhiteSpace(content) ||
-            !TreeSitterLanguageMap.TryResolve(Path.GetExtension(relativePath), relativePath, out var languageName, out var languageKey))
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        var prepared = TreeSitterContentPreparer.Prepare(relativePath, content);
+        if (prepared is null)
         {
             return null;
         }
 
         try
         {
-            using var language = new Language(languageName);
+            using var language = new Language(prepared.LanguageName);
             using var parser = new Parser(language);
-            using var tree = parser.Parse(content);
+            using var tree = parser.Parse(prepared.Content);
             if (tree is null)
             {
                 return null;
@@ -26,7 +31,7 @@ public sealed class TreeSitterExtractor
             var result = new GraphExtractionResult
             {
                 SourceFile = relativePath,
-                Language = languageKey
+                Language = prepared.LanguageKey
             };
 
             var fileNodeId = $"file:{relativePath}";
@@ -41,9 +46,10 @@ public sealed class TreeSitterExtractor
                 Content = content.Length > 4000 ? content[..4000] : content
             });
 
-            CollectSymbols(language, tree.RootNode, content, relativePath, languageKey, result);
-            CollectImports(language, tree.RootNode, relativePath, languageKey, result, fileNodeId);
-            CollectCalls(language, tree.RootNode, relativePath, languageKey, result);
+            CollectSymbols(language, tree.RootNode, prepared.Content, relativePath, prepared.LanguageKey, result);
+            CollectImports(language, tree.RootNode, relativePath, prepared.LanguageKey, result, fileNodeId);
+            CollectCalls(language, tree.RootNode, relativePath, prepared.LanguageKey, result);
+            CollectRationale(content, relativePath, result);
 
             return result.Nodes.Count > 1 ? result : null;
         }
@@ -236,6 +242,91 @@ public sealed class TreeSitterExtractor
                 });
             }
         }
+    }
+
+    private static void CollectRationale(string content, string relativePath, GraphExtractionResult result)
+    {
+        var lines = content.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (!TryParseRationale(lines[index], out var tag, out var text))
+            {
+                continue;
+            }
+
+            var lineNumber = index + 1;
+            var rationaleId = $"rationale:{relativePath}:{lineNumber}";
+            result.Nodes.Add(new ExtractionNode
+            {
+                Id = rationaleId,
+                Label = $"{tag}: {text}",
+                SourceFile = relativePath,
+                SourceLocation = $"L{lineNumber}",
+                Kind = "rationale",
+                StartLine = lineNumber,
+                EndLine = lineNumber,
+                Content = lines[index].Trim()
+            });
+
+            var anchor = FindEnclosingSymbol(result, lineNumber) ?? $"file:{relativePath}";
+            result.Edges.Add(new ExtractionEdge
+            {
+                Source = rationaleId,
+                Target = anchor,
+                Relation = "rationale_for",
+                Confidence = ExtractionConfidence.Extracted,
+                ConfidenceScore = 1.0,
+                SourceFile = relativePath
+            });
+        }
+    }
+
+    private static bool TryParseRationale(string line, out string tag, out string text)
+    {
+        tag = string.Empty;
+        text = string.Empty;
+        var trimmed = line.Trim();
+        if (trimmed.Length < 8)
+        {
+            return false;
+        }
+
+        string? matchedTag = null;
+        if (trimmed.StartsWith("//", StringComparison.Ordinal))
+        {
+            var body = trimmed[2..].TrimStart();
+            matchedTag = MatchRationaleTag(body, out text);
+        }
+        else if (trimmed.StartsWith('#'))
+        {
+            var body = trimmed[1..].TrimStart();
+            matchedTag = MatchRationaleTag(body, out text);
+        }
+
+        if (matchedTag is null)
+        {
+            return false;
+        }
+
+        tag = matchedTag;
+        return !string.IsNullOrWhiteSpace(text);
+    }
+
+    private static string? MatchRationaleTag(string body, out string text)
+    {
+        text = string.Empty;
+        foreach (var candidate in new[] { "NOTE", "IMPORTANT", "HACK", "WHY", "TODO", "FIXME" })
+        {
+            if (!body.StartsWith(candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            text = body[candidate.Length..].TrimStart(':', ' ', '-');
+            return candidate.ToUpperInvariant();
+        }
+
+        return null;
     }
 
     private static string? FindEnclosingSymbol(GraphExtractionResult result, int line)

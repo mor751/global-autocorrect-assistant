@@ -68,8 +68,17 @@ internal sealed class BrainHost
 
         app.MapPost("/api/reload", async () =>
         {
+            var force = false;
+            var report = await _context.Brain.SyncAsync(_projectRoot, force, cancellationToken);
             await cache.RefreshAsync(cancellationToken);
-            return Results.Json(new { ok = true, ready = cache.IsReady }, JsonOptions);
+            return Results.Json(new
+            {
+                ok = true,
+                ready = cache.IsReady,
+                syncPerformed = report.SyncPerformed,
+                message = report.Message,
+                changes = report.AddedFiles + report.ModifiedFiles + report.RemovedFiles
+            }, JsonOptions);
         });
 
         app.MapPost("/api/search", async (BrainWebSearchRequest request) =>

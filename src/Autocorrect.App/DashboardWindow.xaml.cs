@@ -20,6 +20,7 @@ public partial class DashboardWindow : Window
     private readonly Func<string?> _lastErrorProvider;
     private readonly Action _chooseFolder;
     private readonly Func<Task> _reindexProject;
+    private readonly Func<Task<string>> _reloadProject;
     private readonly Action _openRag;
     private readonly Func<Task> _showVectorStoreStatus;
     private readonly Action _openProjectBrain;
@@ -40,6 +41,7 @@ public partial class DashboardWindow : Window
         Func<string?> lastErrorProvider,
         Action chooseFolder,
         Func<Task> reindexProject,
+        Func<Task<string>> reloadProject,
         Action openRag,
         Func<Task> showVectorStoreStatus,
         Action openProjectBrain,
@@ -57,6 +59,7 @@ public partial class DashboardWindow : Window
         _lastErrorProvider = lastErrorProvider;
         _chooseFolder = chooseFolder;
         _reindexProject = reindexProject;
+        _reloadProject = reloadProject;
         _openRag = openRag;
         _showVectorStoreStatus = showVectorStoreStatus;
         _openProjectBrain = openProjectBrain;
@@ -225,6 +228,43 @@ public partial class DashboardWindow : Window
     {
         await _reindexProject();
         await FullRefreshAsync();
+    }
+
+    private async void Reload_OnClick(object sender, RoutedEventArgs e) =>
+        await RunReloadUiAsync(ReloadFilesButton, async () => await _reloadProject());
+
+    private async Task RunReloadUiAsync(System.Windows.Controls.Button button, Func<Task<string>> reload)
+    {
+        var originalLabel = button.Content?.ToString() ?? "Reload files";
+        SetReloadActivity("Scanning project folder for file changes…", true);
+        button.IsEnabled = false;
+        button.Content = "Reloading…";
+
+        try
+        {
+            var message = await reload();
+            SetReloadActivity(message, false);
+            DiagnosticsText.Text = message;
+        }
+        catch (Exception ex)
+        {
+            SetReloadActivity($"Reload failed: {ex.Message}", false);
+            DiagnosticsText.Text = ex.Message;
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            button.Content = originalLabel;
+            await FullRefreshAsync();
+        }
+    }
+
+    public void SetReloadActivity(string message, bool active)
+    {
+        BuildStatusText.Text = message;
+        ProjectStatusChipText.Text = active ? "Reloading" : HumanStatus(_statusProvider());
+        ProjectStatusChipText.Foreground = active ? BrushFor("indexing") : BrushFor(_statusProvider());
+        BuildProgressBar.IsIndeterminate = active;
     }
 
     private void OpenRag_OnClick(object sender, RoutedEventArgs e) => ShowPage(BrainPage, BrainNav, "Woody Brain", "Visualize your project knowledge brain and compile better prompts.");
@@ -516,6 +556,22 @@ public partial class DashboardWindow : Window
         {
             _openBrainWeb(row.ProjectRoot);
         }
+    }
+
+    private async void ProjectsReload_OnClick(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedProjectRow();
+        if (row is null)
+        {
+            SetReloadActivity("Select a project in the list first.", false);
+            DiagnosticsText.Text = "Select a project in the list first.";
+            return;
+        }
+
+        _setActiveProject(row.ProjectRoot);
+        var button = sender as System.Windows.Controls.Button ?? ProjectsReloadButton;
+        await RunReloadUiAsync(button, async () => await _reloadProject());
+        RefreshProjectsPage();
     }
 
     private void ProjectsExplorer_OnClick(object sender, RoutedEventArgs e)

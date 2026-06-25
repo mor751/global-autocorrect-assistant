@@ -51,6 +51,26 @@ public static class GraphRetriever
             .ToList();
     }
 
+    public static IReadOnlyList<string> DeepNeighborFilePaths(ProjectBrainData brain, IReadOnlyList<RetrievalResult> seeds, int maxFiles = 16, int maxHops = 2)
+    {
+        var collected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var frontier = NeighborFilePaths(brain, seeds, maxFiles).ToList();
+        foreach (var path in frontier)
+        {
+            collected.Add(path);
+        }
+
+        for (var hop = 1; hop < maxHops && collected.Count < maxFiles; hop++)
+        {
+            var nextSeeds = frontier.Select(path => new RetrievalResult { FilePath = path, Score = 0.5 }).ToList();
+            frontier = NeighborFilePaths(brain, nextSeeds, maxFiles)
+                .Where(path => collected.Add(path))
+                .ToList();
+        }
+
+        return collected.Take(maxFiles).ToList();
+    }
+
     public static List<RetrievalResult> MergeGraphNeighbors(
         IReadOnlyList<RetrievalResult> ranked,
         IReadOnlyList<RetrievalResult> neighbors,

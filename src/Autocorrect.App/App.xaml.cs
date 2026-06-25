@@ -100,7 +100,8 @@ public partial class App : Application
         var setPetImage = new ToolStripMenuItem("Set pet image...");
         var dashboard = new ToolStripMenuItem("Dashboard...");
         var selectProject = new ToolStripMenuItem("Select project folder...");
-        var reindexProject = new ToolStripMenuItem("Re-index project");
+        var reindexProject = new ToolStripMenuItem("Re-index project (full)");
+        var reloadProject = new ToolStripMenuItem("Reload project files...");
         var openBrain = new ToolStripMenuItem("Open Project Brain...");
         var settings = new ToolStripMenuItem("Settings...");
         var quit = new ToolStripMenuItem("Quit");
@@ -136,6 +137,7 @@ public partial class App : Application
         dashboard.Click += (_, _) => OpenDashboard();
         selectProject.Click += (_, _) => SelectProjectFolder();
         reindexProject.Click += async (_, _) => await ReindexCurrentProjectAsync();
+        reloadProject.Click += async (_, _) => await ReloadCurrentProjectAsync();
         openBrain.Click += (_, _) => OpenProjectBrain();
 
         settings.Click += (_, _) =>
@@ -158,6 +160,7 @@ public partial class App : Application
         menu.Items.Add(setPetImage);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(selectProject);
+        menu.Items.Add(reloadProject);
         menu.Items.Add(reindexProject);
         menu.Items.Add(openBrain);
         menu.Items.Add(settings);
@@ -370,6 +373,7 @@ public partial class App : Application
                 () => _projectBrainLastError,
                 SelectProjectFolder,
                 ReindexCurrentProjectAsync,
+                ReloadCurrentProjectAsync,
                 OpenRag,
                 ShowVectorStoreStatus,
                 () => OpenProjectBrain(),
@@ -569,6 +573,22 @@ public partial class App : Application
                 projectRoot = null;
             }
         }
+        else if (!string.IsNullOrWhiteSpace(projectRoot))
+        {
+            try
+            {
+                var sync = await _projectBrain.SyncAsync(projectRoot, force: false, CancellationToken.None);
+                if (sync.SyncPerformed)
+                {
+                    Notify($"Brain reloaded: {sync.Message}");
+                    _dashboardWindow?.Refresh();
+                }
+            }
+            catch (Exception ex)
+            {
+                _runtimeStatus?.RecordError(ex);
+            }
+        }
 
         _aiPetWindow?.SetThinking(true);
         EnhancementOutcome outcome;
@@ -605,7 +625,7 @@ public partial class App : Application
                 _tokenUsage?.Record(AiRewriteAction.SmartOptimize.ToString(), original, text);
                 _dashboardWindow?.Refresh();
             },
-            ReindexCurrentProjectAsync,
+            async () => { await ReloadCurrentProjectAsync(); },
             () => OpenProjectBrain(outcome.UsedFiles));
 
         window.Show();
@@ -658,11 +678,11 @@ public partial class App : Application
         _dashboardWindow?.Refresh();
         try
         {
-            var brain = await _projectBrain.IndexAsync(projectRoot, CancellationToken.None);
+            var report = await _projectBrain.SyncAsync(projectRoot, force: true, CancellationToken.None);
             var metadata = _projectBrain.LoadIndexMetadata(projectRoot);
             _projectBrainStatus = StatusText(metadata?.Status ?? ProjectBrainStatus.Ready);
             _projectBrainLastError = metadata?.LastError;
-            Notify($"Indexed {brain.Files.Count} files in {brain.ProjectName}.");
+            Notify(report.Message);
         }
         catch (Exception ex)
         {
@@ -703,35 +723,51 @@ public partial class App : Application
         }
     }
 
-    // Rebuilds the Project Brain index and vector store for the configured project root.
     private async Task ReindexCurrentProjectAsync()
+    {
+        await SyncCurrentProjectAsync(force: true, notifyWhenUnchanged: false);
+    }
+
+    private async Task<string> ReloadCurrentProjectAsync() =>
+        await SyncCurrentProjectAsync(force: false, notifyWhenUnchanged: true);
+
+    private async Task<string> SyncCurrentProjectAsync(bool force, bool notifyWhenUnchanged)
     {
         if (_projectBrain is null || _settings is null || string.IsNullOrWhiteSpace(_settings.ProjectRoot))
         {
             _projectBrainStatus = "no_folder";
-            Notify("Select a project folder first.");
-            return;
+            const string message = "Select a project folder first.";
+            Notify(message);
+            return message;
         }
 
         _aiPetWindow?.SetThinking(true);
         _projectBrainStatus = "indexing";
         _projectBrainLastError = null;
+        _dashboardWindow?.SetReloadActivity(force ? "Re-indexing project…" : "Scanning project folder for file changes…", true);
         _dashboardWindow?.Refresh();
         _ragWindow?.Refresh();
         try
         {
-            var brain = await _projectBrain.IndexAsync(_settings.ProjectRoot, CancellationToken.None);
+            var report = await _projectBrain.SyncAsync(_settings.ProjectRoot, force, CancellationToken.None);
             var metadata = _projectBrain.LoadIndexMetadata(_settings.ProjectRoot);
             _projectBrainStatus = StatusText(metadata?.Status ?? ProjectBrainStatus.Ready);
             _projectBrainLastError = metadata?.LastError;
-            Notify($"Indexed {brain.Files.Count} files in {brain.ProjectName}.");
+            if (report.SyncPerformed || notifyWhenUnchanged)
+            {
+                Notify(report.Message);
+            }
+
+            return report.Message;
         }
         catch (Exception ex)
         {
             _projectBrainStatus = "error";
             _projectBrainLastError = ex.Message;
             _runtimeStatus?.RecordError(ex);
-            Notify("Indexing failed.");
+            var message = force ? "Indexing failed." : "Reload failed.";
+            Notify(message);
+            return $"{message} {ex.Message}".Trim();
         }
         finally
         {

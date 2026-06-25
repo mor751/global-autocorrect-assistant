@@ -199,6 +199,7 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel>
                                         <TextBlock Text="Selected Project" Style="{StaticResource Label}" />
@@ -211,7 +212,8 @@
                                         <TextBlock Text="Path" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,12,0,2" />
                                         <TextBlock x:Name="ProjectPathText" Text="No project selected" Foreground="#D5DDE7" FontSize="13" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="1" Content="Open Project" Style="{StaticResource SecondaryButton}" Click="ChooseFolder_OnClick" VerticalAlignment="Center" />
+                                    <Button Grid.Column="1" Content="Open Project" Style="{StaticResource SecondaryButton}" Click="ChooseFolder_OnClick" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <Button x:Name="ReloadFilesButton" Grid.Column="2" Content="Reload files" Style="{StaticResource SecondaryButton}" Click="Reload_OnClick" VerticalAlignment="Center" />
                                 </Grid>
                             </Border>
 
@@ -454,6 +456,7 @@
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                         <Button Content="Browse folder" Style="{StaticResource PrimaryButton}" Click="ProjectsBrowse_OnClick" Margin="0,0,0,8" />
+                                        <Button Content="Reload if changed" Style="{StaticResource SecondaryButton}" Click="ProjectsReload_OnClick" Margin="0,0,0,8" />
                                         <Button Content="Open Brain Web" Style="{StaticResource SecondaryButton}" Click="ProjectsOpenBrain_OnClick" />
                                     </StackPanel>
                                 </Grid>
@@ -478,6 +481,7 @@
                                     </ListView>
                                     <WrapPanel Margin="0,14,0,0">
                                         <Button Content="Set active" Style="{StaticResource PrimaryButton}" Click="ProjectsSetActive_OnClick" Margin="0,0,8,8" />
+                                        <Button x:Name="ProjectsReloadButton" Content="Reload if changed" Style="{StaticResource SecondaryButton}" Click="ProjectsReload_OnClick" Margin="0,0,8,8" />
                                         <Button Content="Index / Re-index" Style="{StaticResource SecondaryButton}" Click="ProjectsIndex_OnClick" Margin="0,0,8,8" />
                                         <Button Content="Open Brain Web" Style="{StaticResource SecondaryButton}" Click="ProjectsOpenBrainSelected_OnClick" Margin="0,0,8,8" />
                                         <Button Content="Open in Explorer" Style="{StaticResource SecondaryButton}" Click="ProjectsExplorer_OnClick" Margin="0,0,8,8" />

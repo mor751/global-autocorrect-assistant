@@ -15,10 +15,11 @@ public static class GraphExtractionMerger
                     "class" or "interface" or "struct" => NodeType.Component,
                     "function" or "method" or "property" => NodeType.Function,
                     "import" => NodeType.Config,
+                    "rationale" => NodeType.Config,
                     _ => NodeType.Function
                 };
 
-                brain.Graph.AddNode(node.Id, nodeType, node.Label, node.SourceFile);
+                brain.Graph.UpsertNode(node.Id, nodeType, node.Label, node.SourceFile, BuildMeta(node));
             }
 
             foreach (var edge in extraction.Edges)
@@ -28,6 +29,7 @@ public static class GraphExtractionMerger
                     "imports" => EdgeType.Imports,
                     "calls" => EdgeType.Calls,
                     "contains" => EdgeType.Contains,
+                    "rationale_for" => EdgeType.RelatedTo,
                     _ => EdgeType.RelatedTo
                 };
 
@@ -65,5 +67,36 @@ public static class GraphExtractionMerger
                 summary.Exports = symbols.Take(40).ToList();
             }
         }
+    }
+
+    private static Dictionary<string, string> BuildMeta(ExtractionNode node)
+    {
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["kind"] = node.Kind,
+            ["confidence"] = ExtractionConfidence.Extracted.ToString()
+        };
+
+        if (node.StartLine > 0)
+        {
+            meta["startLine"] = node.StartLine.ToString();
+        }
+
+        if (node.EndLine > 0)
+        {
+            meta["endLine"] = node.EndLine.ToString();
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.ParentSymbol))
+        {
+            meta["parentSymbol"] = node.ParentSymbol;
+        }
+
+        if (!string.IsNullOrWhiteSpace(node.SourceLocation))
+        {
+            meta["sourceLocation"] = node.SourceLocation;
+        }
+
+        return meta;
     }
 }

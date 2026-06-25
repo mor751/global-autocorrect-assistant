@@ -62,6 +62,28 @@ public static partial class PromptSymbolParser
             result.Symbols.Add(value);
         }
 
+        foreach (Match match in AcronymRegex().Matches(prompt))
+        {
+            var value = match.Value;
+            if (IsNoise(value))
+            {
+                continue;
+            }
+
+            result.Symbols.Add(value);
+        }
+
+        foreach (Match match in ShortTokenRegex().Matches(prompt))
+        {
+            var value = match.Value;
+            if (IsNoise(value))
+            {
+                continue;
+            }
+
+            result.Symbols.Add(value);
+        }
+
         result.Symbols = result.Symbols.Distinct(StringComparer.Ordinal).ToList();
         result.TypeNames = result.TypeNames.Distinct(StringComparer.Ordinal).ToList();
         result.MethodNames = result.MethodNames.Distinct(StringComparer.Ordinal).ToList();
@@ -71,13 +93,24 @@ public static partial class PromptSymbolParser
 
     private static bool IsNoise(string value)
     {
+        if (value.Length < 2)
+        {
+            return true;
+        }
+
+        if (value.Length == 2 && value.All(char.IsUpper))
+        {
+            return false;
+        }
+
         if (value.Length < 3)
         {
             return true;
         }
 
         var lower = value.ToLowerInvariant();
-        return lower is "the" or "and" or "for" or "fix" or "bug" or "add" or "make" or "use" or "not" or "api" or "sql" or "rag";
+        return lower is "the" or "and" or "for" or "fix" or "bug" or "add" or "make" or "use" or "not" or "api" or "sql" or "rag"
+            or "where" or "is" or "on" or "of" or "in" or "to" or "app" or "how" or "what" or "when" or "why" or "all" or "any";
     }
 
     private static string NormalizePath(string path) => path.Replace('\\', '/').Trim();
@@ -90,6 +123,12 @@ public static partial class PromptSymbolParser
 
     [GeneratedRegex(@"\b[a-z][A-Za-z0-9_]{3,}\b", RegexOptions.Compiled)]
     private static partial Regex CamelCaseRegex();
+
+    [GeneratedRegex(@"\b[A-Z]{2,6}\b", RegexOptions.Compiled)]
+    private static partial Regex AcronymRegex();
+
+    [GeneratedRegex(@"\b[a-z]{2,6}\b", RegexOptions.Compiled)]
+    private static partial Regex ShortTokenRegex();
 
     [GeneratedRegex(@"(?:[\w.-]+[/\\])+[\w.-]+\.(?:cs|ts|tsx|js|jsx|py|go|rs|java|md|json|xaml|sql)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex FilePathRegex();
